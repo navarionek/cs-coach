@@ -4,3 +4,6 @@ supabase/.temp/
 
 # Team password for the playbook (only its hash is in the DB).
 team-key.txt
+
+# Granko Recorder config with the team password.
+recorder/config.json

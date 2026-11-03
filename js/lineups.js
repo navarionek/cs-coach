@@ -31,6 +31,7 @@ export function lineupCard(l, { selectable = false, selected = false } = {}) {
     <div class="lu-body">
       <b>${esc(l.title)}</b>
       <span class="muted small">${l.position ? esc(l.position) : ''}${l.position && l.target ? ' → ' : ''}${l.target ? esc(l.target) : ''}</span>
+      ${l.setpos ? `<span class="recorded">🎮 nagrane w grze</span>` : ''}
       ${l.throw ? `<span class="throw">${esc(THROWS[l.throw] || l.throw)}</span>` : ''}
     </div>
   </button>`;
@@ -93,6 +94,8 @@ export function openLineup(id) {
         <figure data-i="${i}"><img src="${esc(imageUrl(img.path))}" alt="" loading="lazy"><figcaption>${esc(CAPTIONS[img.caption] || '')}</figcaption></figure>`).join('')}
       </div>` : '<p class="muted">Brak screenów.</p>'}
       ${l.description ? `<p class="lu-desc">${esc(l.description)}</p>` : ''}
+      ${l.setpos ? `<div class="teleport"><code>${esc(l.setpos)}</code><button type="button" class="btn small" data-act="tp">📋 Kopiuj teleport</button></div>
+        <p class="muted small">Wklej w konsoli CS2 na serwerze z sv_cheats 1 (np. Granko Recorder), żeby stanąć dokładnie w miejscu rzutu.</p>` : ''}
       ${l.video_url ? `<p><a href="${esc(l.video_url)}" target="_blank" rel="noopener">▶ Film z rzutem</a></p>` : ''}
       <div class="actions">
         <span class="muted small">${l.created_by ? `dodał(a) ${memberTag(member(l.created_by))}` : ''}</span>
@@ -101,6 +104,10 @@ export function openLineup(id) {
       </div>
     </div>`, { wide: true });
   el.querySelectorAll('.lu-gallery figure').forEach(f => f.addEventListener('click', () => lightbox(imgs, +f.dataset.i)));
+  el.querySelector('[data-act="tp"]')?.addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText(l.setpos); toast('Skopiowano, wklej w konsoli CS2'); }
+    catch { toast('Nie udało się skopiować', 'err'); }
+  });
   el.querySelector('[data-act="edit"]').onclick = () => { close(); editLineup(l); };
   el.querySelector('[data-act="del"]').onclick = async () => {
     if (!await confirmBox(`Usunąć line-up „${l.title}”?`)) return;
@@ -240,6 +247,7 @@ export function editLineup(existing, defaults = {}) {
         video_url: form.video_url.value.trim(),
         images,
         spot,
+        setpos: existing?.setpos || null,
         created_by: existing?.created_by || team.me,
       };
       try {

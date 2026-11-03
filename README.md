@@ -22,3 +22,21 @@ supabase functions deploy cs-upload --no-verify-jwt --project-ref qnhzbnofloghyh
 `cs` musi być w `[api] schemas` w `WeedOut/supabase/config.toml` (+ `supabase config push`). Hasło drużyny ustawia się SQL-em z komentarza na górze `002_playbook.sql` (w bazie jest tylko jego hash).
 
 Prawdziwy cfg z tokenem i `team-key.txt` z hasłem są w `.gitignore`; w repo jest tylko `gamestate_integration_cscoach.cfg.template`.
+
+## Granko Recorder (line-upy prosto z gry)
+
+Na PC z CS2 i Node:
+
+```bash
+cp recorder/config.example.json recorder/config.json   # wpisz hasło drużyny i swój nick
+node recorder/granko-recorder.js de_ancient            # albo de_inferno / de_nuke
+```
+
+Recorder odpala CS2 offline (z `-condebug`), sam wpisuje `exec granko` (cheaty, bez botów, nieskończona rozgrzewka, kasa i granaty, celownik bez reszty HUD-a) i czyta `console.log`:
+
+- **F6** – stoisz w miejscu rzutu i celujesz: nowy line-up z `setpos/setang`, screenem z celownikiem i punktem na radarze,
+- **F7** – po rzucie: screen efektu,
+- **F8** – stoisz tam, gdzie granat wylądował: punkt lądowania na radarze,
+- **F5** – powrót na ostatnią pozycję z F6.
+
+CS2 nie ma zdalnej konsoli, więc klawisze odpalają małe cfg (`grankopos` itd.), a ich `execing …` i `getpos` widać w logu. Na koniec `exec grankooff` przywraca HUD i broń.

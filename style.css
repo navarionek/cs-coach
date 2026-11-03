@@ -526,3 +526,6 @@ label { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color:
   .map-pick button::before { background: linear-gradient(0deg, rgba(8, 10, 14, .85), rgba(8, 10, 14, .2)); }
   .map-pick .emblem { width: 34px; height: 34px; }
 }
+.teleport { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 12px 0 4px; }
+.teleport code { flex: 1; min-width: 200px; padding: 8px 10px; font-size: 12px; }
+.recorded { font-size: 11px; color: #3ddc97; font-weight: 600; }
