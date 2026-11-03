@@ -128,7 +128,16 @@ export function segmented(name, options, value) {
 export function bindSegmented(root, name, fn) {
   root.querySelectorAll(`[data-seg="${name}"] button`).forEach(b => b.addEventListener('click', () => fn(b.dataset.v)));
 }
-export const mapSwitch = current => segmented('map', MAPS.map(m => [m.id, m.name]), current);
+// Map art (emblem + cover screenshot from the game files) comes with the playbook.
+export const mapArt = (map, kind) => team.playbook?.map_art?.find(a => a.map === map && a.kind === kind);
+const coverStyle = map => { const c = mapArt(map, 'cover'); return c ? `style="--cover:url('${esc(imageUrl(c.path))}')"` : ''; };
+const emblem = map => { const i = mapArt(map, 'icon'); return i ? `<img class="emblem" src="${esc(imageUrl(i.path))}" alt="">` : ''; };
+
+// Map picker tiles; same data-seg contract as segmented(), so bindSegmented works on it.
+export const mapSwitch = current => `<div class="map-pick" data-seg="map">${MAPS.map(m =>
+  `<button type="button" data-v="${m.id}" class="map-${m.id} ${m.id === current ? 'on' : ''}" ${coverStyle(m.id)}>${emblem(m.id)}<span>${m.name}</span></button>`).join('')}</div>`;
+// Map name plate with cover and emblem (falls back to the gradient for maps without art).
+export const mapPlate = (map, cls = '') => `<div class="map-plate map-${esc(map)} ${cls}" ${coverStyle(map)}>${emblem(map)}<span>${esc(mapName(map))}</span></div>`;
 export const sideBadge = side => `<span class="side side-${esc(side)}">${side === 'any' ? 'T/CT' : esc(side)}</span>`;
 export const nadeBadge = nade => `<span class="nade nade-${esc(nade)}">${NADES[nade]?.icon || ''} ${esc(NADES[nade]?.label || nade)}</span>`;
 export const kindBadge = kind => `<span class="kind kind-${esc(kind)}">${esc(KINDS[kind] || kind)}</span>`;

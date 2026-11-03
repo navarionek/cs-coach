@@ -1,10 +1,11 @@
 // Live mode: reads the team's GSI state, picks a tactic for the next round and shows every player
 // their own role. Calls are shared through cs.calls + Realtime, so all five screens agree.
 import {
-  sb, team, rpc, esc, t, toast, openModal, mapName, money, KINDS, MAPS,
-  segmented, bindSegmented, sideBadge, kindBadge, member, memberColor, tactic,
+  sb, team, rpc, esc, t, toast, openModal, lightbox, mapName, money, KINDS, MAPS,
+  segmented, bindSegmented, sideBadge, kindBadge, member, memberColor, tactic, mapPlate,
 } from './core.js';
 import { roleBlock, bindRoleLineups, recordText } from './tactics.js';
+import { mountPlan, hasPlan } from './radar.js';
 
 const POLL_MS = 3000;
 const FRESH_MS = 90e3;          // GSI heartbeat is 60 s
@@ -280,7 +281,7 @@ function draw(force = false) {
 
   L.el.innerHTML = `
     <div class="card live-head">
-      <div class="lh-map map-${esc(ctx.map)}">${esc(mapName(ctx.map))}</div>
+      ${mapPlate(ctx.map, 'lh-map')}
       <div class="lh-mid">
         <div class="lh-round">Runda ${ctx.round}</div>
         <div class="muted small">${ctx.practice ? 'Trening' : esc(PHASES[ctx.phase] || ctx.phase)}</div>
@@ -310,11 +311,11 @@ function draw(force = false) {
       </section>
       <section class="card mytask">
         <div class="call-label">TWOJE ZADANIE</div>
-        ${myRole ? roleBlock(myRole, { mine: true, big: true })
+        ${myRole ? roleBlock(myRole, { mine: true, big: true, plan: { map: x.map, roles: x.roles } })
           : x ? '<p class="muted">Nie masz przypisanej roli w tej taktyce. Zobacz role poniżej i weź wolną.</p>'
           : '<p class="muted">Pojawi się, jak będzie wybrana taktyka.</p>'}
       </section>
-      ${others.length ? `<section class="card roles-live"><div class="call-label">RESZTA DRUŻYNY</div><div class="roles-grid">${others.map(r => roleBlock(r)).join('')}</div></section>` : ''}
+      ${x && (others.length || hasPlan(x.roles)) ? `<section class="card roles-live"><div class="call-label">PLAN DRUŻYNY</div><div class="plan-slot"></div><div class="roles-grid">${others.map(r => roleBlock(r)).join('')}</div></section>` : ''}
       ${sugg.length ? `<section class="card sugg">
         <div class="call-label">PROPOZYCJE</div>
         ${sugg.slice(0, 3).map((s, i) => suggRow(s, i, call)).join('')}
@@ -327,6 +328,14 @@ function draw(force = false) {
     </div>`;
 
   drawEcon(ctx);
+  const planSlot = L.el.querySelector('.plan-slot');
+  if (planSlot && x) {
+    mountPlan(planSlot, {
+      map: x.map, roles: x.roles, highlight: myRole ? x.roles.indexOf(myRole) : null,
+      lineups: x.roles.flatMap(r => (r.lineups || []).map(id => team.playbook.lineups.find(l => l.id === id)).filter(Boolean)),
+      onOpen: id => { const l = team.playbook.lineups.find(z => z.id === id); if (l?.images?.length) lightbox(l.images, 0); },
+    });
+  }
   bindRoleLineups(L.el, { gallery: true });
   L.el.querySelector('[data-act="change"]')?.addEventListener('click', () => openPicker(ctx, sugg));
   L.el.querySelectorAll('[data-play]').forEach(b => b.addEventListener('click', () => callTactic(b.dataset.play)));

@@ -5,7 +5,7 @@ import {
   lineup, member, memberTag, memberColor, tactic,
 } from './core.js';
 import { pickLineups, openLineup } from './lineups.js';
-import { radarStatic } from './radar.js';
+import { hasRadar, planStatic, mountPlan, mountRouteEditor } from './radar.js';
 
 const ui = { map: store.get('cs.map') || MAPS[0].id, side: store.get('cs.side') || 'T', archived: false };
 const KIND_ORDER = ['pistol', 'eco', 'force', 'full', 'any'];
@@ -51,14 +51,15 @@ function tacticCard(x) {
 }
 
 // Role card used both in the tactic view and in live mode.
-export function roleBlock(role, { mine = false, big = false } = {}) {
+// `plan` ({map, roles}) draws the team routes with this role highlighted (live mode).
+export function roleBlock(role, { mine = false, big = false, plan = null } = {}) {
   const m = member(role.member_id);
   const lus = (role.lineups || []).map(lineup).filter(Boolean);
   return `<div class="role ${mine ? 'mine' : ''} ${big ? 'big' : ''}" style="--c:${esc(memberColor(m))}">
     <div class="role-head"><span class="role-name">${esc(role.name || 'Rola')}</span>${memberTag(m)}</div>
     ${role.position ? `<div class="role-pos">📍 ${esc(role.position)}</div>` : ''}
     ${role.task ? `<div class="role-task">${esc(role.task)}</div>` : ''}
-    ${big && lus.length ? radarStatic(lus[0].map, lus, { cls: 'role-radar' }) : ''}
+    ${big && plan ? planStatic(plan.map, plan.roles, { highlight: plan.roles.indexOf(role), lineups: lus }) : ''}
     ${lus.length ? `<div class="role-lus">${lus.map(l => {
       const img = l.images?.[0];
       return `<button type="button" class="role-lu" data-open-lineup="${esc(l.id)}">
@@ -87,6 +88,7 @@ export function openTactic(id) {
       <h2>${esc(x.name)}</h2>
       ${x.summary ? `<p class="lead">${esc(x.summary)}</p>` : ''}
       ${x.notes ? `<p class="notes">${esc(x.notes)}</p>` : ''}
+      <div class="tac-plan"></div>
       <div class="roles-grid">${x.roles.map(r => roleBlock(r, { mine: r.member_id === team.me })).join('')}</div>
       <div class="actions">
         <button type="button" class="btn ghost" data-act="archive">${x.archived ? 'Przywróć' : 'Archiwizuj'}</button>
@@ -95,6 +97,9 @@ export function openTactic(id) {
       </div>
     </div>`, { wide: true });
   bindRoleLineups(el);
+  mountPlan(el.querySelector('.tac-plan'), {
+    map: x.map, roles: x.roles, lineups: x.roles.flatMap(r => (r.lineups || []).map(lineup).filter(Boolean)), onOpen: openLineup,
+  });
   el.querySelector('[data-act="edit"]').onclick = () => { close(); editTactic(x); };
   el.querySelector('[data-act="dup"]').onclick = () => {
     close();
@@ -161,6 +166,10 @@ export function editTactic(existing) {
         </div>
         <label>Pozycja<input name="rpos" value="${esc(r.position || '')}" placeholder="np. banana, za skrzynią" maxlength="80"></label>
         <label>Zadanie<textarea name="rtask" rows="3" placeholder="np. 1:40 flash nad car, wchodzisz pierwszy na site, czyścisz plat">${esc(r.task || '')}</textarea></label>
+        <div class="route-row">
+          ${r.path?.length ? planStatic(form.map.value, [r], { cls: 'mini' }) : ''}
+          <button type="button" class="btn small" data-route="${i}" ${hasRadar(form.map.value) ? '' : 'disabled'}>🗺 ${r.path?.length ? `Trasa (${r.path.length} pkt)` : 'Wyznacz trasę'}</button>
+        </div>
         <div class="role-lus edit">
           ${lus.map(l => `<span class="lu-chip">${nadeBadge(l.nade)} ${esc(l.title)}<button type="button" data-rm-lu="${esc(l.id)}" data-role="${i}">✕</button></span>`).join('')}
           <button type="button" class="btn small" data-add-lu="${i}">+ granaty</button>
@@ -176,6 +185,12 @@ export function editTactic(existing) {
       r.lineups = r.lineups.filter(id => id !== b.dataset.rmLu);
       drawRoles();
     });
+    rolesEl.querySelectorAll('[data-route]').forEach(b => b.onclick = async () => {
+      syncRoles();
+      const path = await editRoute(form.map.value, x.roles, +b.dataset.route);
+      if (path) x.roles[+b.dataset.route].path = path;
+      drawRoles();
+    });
     rolesEl.querySelectorAll('[data-add-lu]').forEach(b => b.onclick = async () => {
       syncRoles();
       const r = x.roles[+b.dataset.addLu];
@@ -185,6 +200,7 @@ export function editTactic(existing) {
     });
   }
   drawRoles();
+  form.map.addEventListener('change', drawRoles);
 
   el.querySelector('[data-act="cancel"]').onclick = () => close();
   form.addEventListener('submit', async e => {
@@ -212,4 +228,28 @@ export function editTactic(existing) {
     }
   });
   form.name.focus();
+}
+
+// Route editor for one role over the team plan. Resolves with the new path, or null when cancelled.
+function editRoute(map, roles, index) {
+  return new Promise(resolve => {
+    const role = roles[index];
+    let path = role.path || [];
+    let done = false;
+    const lus = (role.lineups || []).map(lineup).filter(Boolean);
+    const who = member(role.member_id);
+    const { el, close } = openModal(`
+      <div class="route-editor">
+        <h2>Trasa: ${esc(role.name || `Rola ${index + 1}`)}${who ? ` <span class="mtag" style="--c:${esc(memberColor(who))}">${esc(who.name)}</span>` : ''}</h2>
+        <p class="muted small">Pierwszy punkt to start, kolejne to miejsca po drodze, ostatni to cel. Inne role są przygaszone, żeby było widać, jak się zgrywacie.</p>
+        <div class="route-ed"></div>
+        <div class="actions">
+          <button type="button" class="btn" data-act="cancel">Anuluj</button>
+          <button type="button" class="btn primary" data-act="ok">Gotowe</button>
+        </div>
+      </div>`, { wide: true, dismissable: false, onClose: () => resolve(done ? path : null) });
+    mountRouteEditor(el.querySelector('.route-ed'), { map, roles, index, lineups: lus, onChange: p => { path = p; } });
+    el.querySelector('[data-act="cancel"]').onclick = () => close();
+    el.querySelector('[data-act="ok"]').onclick = () => { done = true; close(); };
+  });
 }
