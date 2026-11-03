@@ -1,3 +1,6 @@
 # The real cfg carries the team token.
 gsi/gamestate_integration_cscoach.cfg
 supabase/.temp/
+
+# Team password for the playbook (only its hash is in the DB).
+team-key.txt

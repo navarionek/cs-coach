@@ -1,11 +1,17 @@
 // Network-first: the app is always fresh online, the cache is only an offline fallback.
 // Bump the version when the ASSETS list changes.
-const CACHE_NAME = 'cscoach-v1';
+const CACHE_NAME = 'cscoach-v2';
 const ASSETS = [
   './',
   './index.html',
   './style.css',
-  './app.js',
+  './js/main.js',
+  './js/core.js',
+  './js/gate.js',
+  './js/stats.js',
+  './js/live.js',
+  './js/tactics.js',
+  './js/lineups.js',
   './manifest.json',
   './icon-192x192.png',
   './icon-512x512.png',

@@ -26,39 +26,30 @@
       </div>
     </div>
     <nav class="tabs">
-      <button class="tab active" data-tab="matches">Mecze</button>
+      <button class="tab" data-tab="live">Na żywo</button>
+      <button class="tab" data-tab="tactics">Taktyki</button>
+      <button class="tab" data-tab="lineups">Line-upy</button>
+      <button class="tab" data-tab="matches">Mecze</button>
       <button class="tab" data-tab="players">Gracze</button>
-      <button class="tab" data-tab="setup">Instalacja</button>
+      <button class="tab" data-tab="team">Drużyna</button>
     </nav>
   </header>
 
   <main>
     <section id="live" class="live" hidden></section>
-
-    <section id="tab-matches" class="panel">
+    <section id="tab-live" class="panel" hidden></section>
+    <section id="tab-tactics" class="panel" hidden></section>
+    <section id="tab-lineups" class="panel" hidden></section>
+    <section id="tab-matches" class="panel" hidden>
       <div id="matches"><p class="muted">Ładuję…</p></div>
     </section>
-
     <section id="tab-players" class="panel" hidden>
       <div id="players"></div>
     </section>
-
-    <section id="tab-setup" class="panel" hidden>
-      <div class="card setup">
-        <h2>Jak podpiąć swoją grę</h2>
-        <ol>
-          <li>Weź od ziomka plik <code>gamestate_integration_cscoach.cfg</code> (jest w nim token drużyny, nie wrzucaj go nigdzie publicznie).</li>
-          <li>Wrzuć go do folderu<br><code>Steam\steamapps\common\Counter-Strike Global Offensive\game\csgo\cfg\</code><br>
-            Najszybciej: Steam → CS2 → prawy klik → Zarządzaj → Przeglądaj pliki lokalne → <code>game\csgo\cfg</code>.</li>
-          <li>Uruchom CS2 ponownie (gra czyta ten plik tylko przy starcie).</li>
-          <li>Graj. Po rozgrzewce mecz pojawi się tutaj, a na górze zobaczysz, kto gra teraz.</li>
-        </ol>
-        <p class="muted">To oficjalne Game State Integration od Valve: gra sama wysyła stan meczu. Nic nie czyta pamięci gry, więc VAC i Faceit AC nie mają się do czego przyczepić. Dane dotyczą tylko twojego gracza: twoje kille, dmg, kasa, wynik i czas rund.</p>
-      </div>
-    </section>
+    <section id="tab-team" class="panel" hidden></section>
   </main>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/dist/umd/supabase.min.js"></script>
-  <script src="app.js"></script>
+  <script type="module" src="js/main.js"></script>
 </body>
 </html>

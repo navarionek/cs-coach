@@ -1,7 +1,5 @@
-// CS Coach: read-only view of the cs schema (players, matches, rounds, live).
-const SUPABASE_URL = 'https://qnhzbnofloghyhbmkvnq.supabase.co';
-const SUPABASE_KEY = 'sb_publishable_wDsMbOBSA67oTBVOcan80g_mLhKrnqW';
-const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY, { db: { schema: 'cs' } });
+// Match history and per-player stats (public, no team key needed).
+import { sb, esc, t, mapName } from './core.js';
 
 const STALE_MS = 20 * 60e3;     // a live match with no update for this long was left
 const SAME_GAME_MS = 10 * 60e3; // teammates' matches on one map starting this close are one game
@@ -16,9 +14,6 @@ const REASONS = {
 
 const state = { players: {}, matches: [], rounds: {}, live: [], open: new Set() };
 
-const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
-const t = iso => iso ? new Date(iso).getTime() : null;
-const mapName = m => { const n = String(m || '').replace(/^(de|cs|ar)_/, ''); return n.charAt(0).toUpperCase() + n.slice(1); };
 const modeName = m => ({ competitive: 'Competitive / Premier', scrimcomp2v2: 'Wingman', casual: 'Casual', deathmatch: 'Deathmatch' })[m] || m || '';
 const playerName = id => state.players[id]?.name || id;
 const fmtDur = ms => {
@@ -89,10 +84,12 @@ function groupGames(matches) {
 
 function memberStats(m) {
   const rs = (state.rounds[m.id] || []).filter(r => r.kills != null);
-  const dmg = rs.reduce((s, r) => s + (r.damage || 0), 0);
+  // CS2 GSI does not send round damage (CS:GO did), so ADR only shows where it exists.
+  const withDmg = rs.filter(r => r.damage != null);
+  const dmg = withDmg.reduce((s, r) => s + r.damage, 0);
   const kills = rs.reduce((s, r) => s + (r.kills || 0), 0);
   const hs = rs.reduce((s, r) => s + (r.headshots || 0), 0);
-  return { rounds: rs.length, adr: rs.length ? Math.round(dmg / rs.length) : null, hs: pct(hs, kills), survived: rs.filter(r => r.survived).length };
+  return { rounds: rs.length, adr: withDmg.length ? Math.round(dmg / withDmg.length) : null, hs: pct(hs, kills), survived: rs.filter(r => r.survived).length };
 }
 
 function renderLive() {
@@ -182,7 +179,7 @@ function renderRounds(g, members) {
     return `<div class="grid-row"><div class="gname">${esc(playerName(m.steamid))}</div>${rounds.map(r => {
       const x = rs[r.no];
       if (!x || x.kills == null) return `<div class="k none ${r.no === half ? 'half' : ''}">·</div>`;
-      const tip = `Runda ${r.no}: ${x.kills} kill (${x.headshots ?? 0} HS), ${x.damage ?? '?'} dmg, sprzęt $${x.equip_value ?? '?'}, kasa na start $${x.money_start ?? '?'}${x.survived ? ', przeżył' : ', zginął'}`;
+      const tip = `Runda ${r.no}: ${x.kills} kill (${x.headshots ?? 0} HS), ${x.damage != null ? x.damage + ' dmg, ' : ''}sprzęt $${x.equip_value ?? '?'}, kasa na start $${x.money_start ?? '?'}${x.survived ? ', przeżył' : ', zginął'}`;
       return `<div class="k k${Math.min(x.kills, 5)} ${x.survived ? '' : 'dead'} ${r.no === half ? 'half' : ''}" title="${esc(tip)}">${x.kills || ''}</div>`;
     }).join('')}</div>`;
   }).join('');
@@ -213,14 +210,14 @@ function renderPlayers() {
   const agg = {};
   for (const g of games) {
     for (const m of g.members) {
-      const a = (agg[m.steamid] ||= { games: 0, wins: 0, losses: 0, k: 0, d: 0, a: 0, mvps: 0, rounds: 0, dmg: 0, hs: 0, rk: 0, survived: 0, equip: 0, equipN: 0 });
+      const a = (agg[m.steamid] ||= { games: 0, wins: 0, losses: 0, k: 0, d: 0, a: 0, mvps: 0, rounds: 0, dmg: 0, dmgN: 0, hs: 0, rk: 0, survived: 0, equip: 0, equipN: 0 });
       a.games++;
       if (g.known && g.us > g.them) a.wins++;
       if (g.known && g.us < g.them) a.losses++;
       a.k += m.kills || 0; a.d += m.deaths || 0; a.a += m.assists || 0; a.mvps += m.mvps || 0;
       for (const r of state.rounds[m.id] || []) {
         if (r.kills == null) continue;
-        a.rounds++; a.dmg += r.damage || 0; a.hs += r.headshots || 0; a.rk += r.kills; a.survived += r.survived ? 1 : 0;
+        a.rounds++; if (r.damage != null) { a.dmg += r.damage; a.dmgN++; } a.hs += r.headshots || 0; a.rk += r.kills; a.survived += r.survived ? 1 : 0;
         if (r.equip_value != null) { a.equip += r.equip_value; a.equipN++; }
       }
     }
@@ -233,7 +230,7 @@ function renderPlayers() {
       <div class="muted">${a.games} meczów · ${a.wins}W ${a.losses}L · ${pct(a.wins, a.wins + a.losses)} wygranych</div>
       <div class="stats">
         <div><b>${ratio(a.k, a.d)}</b><span>K/D</span></div>
-        <div><b>${a.rounds ? Math.round(a.dmg / a.rounds) : '–'}</b><span>ADR</span></div>
+        <div><b>${a.dmgN ? Math.round(a.dmg / a.dmgN) : '–'}</b><span>ADR</span></div>
         <div><b>${pct(a.hs, a.rk)}</b><span>HS</span></div>
         <div><b>${a.rounds ? (a.rk / a.rounds).toFixed(2) : '–'}</b><span>kille / runda</span></div>
         <div><b>${pct(a.survived, a.rounds)}</b><span>przeżyte rundy</span></div>
@@ -249,26 +246,9 @@ function render() {
   renderPlayers();
 }
 
-document.querySelectorAll('.tab').forEach(b => b.addEventListener('click', () => {
-  document.querySelectorAll('.tab').forEach(x => x.classList.toggle('active', x === b));
-  document.querySelectorAll('.panel').forEach(p => { p.hidden = p.id !== 'tab-' + b.dataset.tab; });
-}));
-
-load();
-setInterval(load, 20000);
-// An installed PWA resumed from the background doesn't reload, so refresh right away.
-document.addEventListener('visibilitychange', () => { if (!document.hidden) load(); });
-
-if ('serviceWorker' in navigator) {
-  // A new SW took over: reload to pick up the new code (not on the very first install).
-  const hadController = !!navigator.serviceWorker.controller;
-  let reloading = false;
-  navigator.serviceWorker.addEventListener('controllerchange', () => {
-    if (!hadController || reloading) return;
-    reloading = true;
-    window.location.reload();
-  });
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('sw.js').catch(err => console.warn('SW registration failed:', err));
-  });
+// The stats tabs refresh on their own; the live strip at the top is visible on every tab.
+export function initStats() {
+  load();
+  setInterval(load, 20000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) load(); });
 }

@@ -208,6 +208,10 @@ begin
         insert into cs.rounds (match_id, round_no, steamid, winner, win_reason, ended_at)
         values (m.id, k, me, winner, reason, ts)
         on conflict do nothing;
+        -- Did the tactic called for this round work? (cs.calls is defined in 002_playbook.sql.)
+        update cs.calls set won = (winner = side)
+        where map = map_name and round_no = k and won is null and winner is not null
+            and created_at > now() - interval '6 minutes';
     end loop;
     m.rounds_recorded := greatest(m.rounds_recorded, rounds_done);
 
