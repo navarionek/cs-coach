@@ -4,8 +4,9 @@ import {
   team, store, rpc, loadPlaybook, esc, toast, openModal, confirmBox, lightbox, uploadImage, deleteImages, imageUrl,
   MAPS, NADES, THROWS, CAPTIONS, segmented, bindSegmented, mapSwitch, sideBadge, nadeBadge, lineup, member, memberTag,
 } from './core.js';
+import { hasRadar, radarStatic, mountLineupMap, mountSpotEditor } from './radar.js';
 
-const ui = { map: store.get('cs.map') || MAPS[0].id, side: 'all', nade: 'all', q: '' };
+const ui = { map: store.get('cs.map') || MAPS[0].id, side: 'all', nade: 'all', q: '', view: store.get('cs.luView') || 'grid' };
 
 const cover = l => l.images?.find(i => i.caption === 'result') || l.images?.[0];
 
@@ -39,6 +40,7 @@ export function renderLineups(el) {
   el.innerHTML = `
     <div class="toolbar">
       ${mapSwitch(ui.map)}
+      ${hasRadar(ui.map) ? segmented('view', [['grid', '▦ Lista'], ['map', '🗺 Mapa']], ui.view) : ''}
       <button type="button" class="btn primary" data-act="new">+ Nowy line-up</button>
     </div>
     <div class="toolbar sub">
@@ -50,6 +52,12 @@ export function renderLineups(el) {
   const grid = el.querySelector('.lu-grid');
   const drawGrid = () => {
     const list = filtered(ui);
+    if (ui.view === 'map' && hasRadar(ui.map)) {
+      grid.className = 'lu-map';
+      mountLineupMap(grid, { map: ui.map, lineups: list, onOpen: openLineup });
+      return;
+    }
+    grid.className = 'lu-grid';
     grid.innerHTML = list.length
       ? list.map(l => lineupCard(l)).join('')
       : `<div class="card empty wide-empty"><h3>Brak line-upów na ${esc(MAPS.find(m => m.id === ui.map)?.name)}</h3>
@@ -59,6 +67,7 @@ export function renderLineups(el) {
   drawGrid();
   bindSegmented(el, 'map', v => { ui.map = v; store.set('cs.map', v); renderLineups(el); });
   bindSegmented(el, 'side', v => { ui.side = v; renderLineups(el); });
+  bindSegmented(el, 'view', v => { ui.view = v; store.set('cs.luView', v); renderLineups(el); });
   bindSegmented(el, 'nade', v => { ui.nade = v; renderLineups(el); });
   el.querySelector('.search').addEventListener('input', e => { ui.q = e.target.value; drawGrid(); });
   el.querySelector('[data-act="new"]').addEventListener('click', () => editLineup(null, { map: ui.map, side: ui.side === 'all' ? 'T' : ui.side, nade: ui.nade === 'all' ? 'smoke' : ui.nade }));
@@ -79,6 +88,7 @@ export function openLineup(id) {
           ${l.throw ? `<div><span class="muted small">RZUT</span><b>${esc(THROWS[l.throw] || l.throw)}</b></div>` : ''}
         </div>
       </div>
+      ${radarStatic(l.map, [l], { cls: 'detail' })}
       ${imgs.length ? `<div class="lu-gallery">${imgs.map((img, i) => `
         <figure data-i="${i}"><img src="${esc(imageUrl(img.path))}" alt="" loading="lazy"><figcaption>${esc(CAPTIONS[img.caption] || '')}</figcaption></figure>`).join('')}
       </div>` : '<p class="muted">Brak screenów.</p>'}
@@ -109,6 +119,7 @@ export function editLineup(existing, defaults = {}) {
     const original = new Set((existing?.images || []).map(i => i.path));
     const uploaded = new Set(); // uploaded in this session, deleted again if the editor is cancelled
     let images = [...(l.images || [])];
+    let spot = l.spot || null;
     let pending = 0;
     let saved = false;
 
@@ -128,6 +139,7 @@ export function editLineup(existing, defaults = {}) {
           <label>Skąd rzucasz<input name="position" value="${esc(l.position || '')}" placeholder="np. T spawn, róg skrzyni" maxlength="80"></label>
           <label>Gdzie ląduje<input name="target" value="${esc(l.target || '')}" placeholder="np. CT na A" maxlength="80"></label>
         </div>
+        <div class="spot-field"><div class="label">Na mapie <span class="muted small">kliknij, gdzie stoisz, potem gdzie ląduje</span></div><div class="spot-ed"></div></div>
         <div class="images-field">
           <div class="label">Screeny <span class="muted small">gdzie stanąć, gdzie celować, efekt</span></div>
           <div class="img-list"></div>
@@ -204,6 +216,11 @@ export function editLineup(existing, defaults = {}) {
     drop.addEventListener('drop', e => { e.preventDefault(); drop.classList.remove('over'); addFiles(e.dataTransfer.files); });
     drawImages();
 
+    const ed = mountSpotEditor(el.querySelector('.spot-ed'), { map: l.map, spot, nade: l.nade, side: l.side, onChange: s => { spot = s; } });
+    form.map.addEventListener('change', () => ed.update({ map: form.map.value }));
+    form.side.addEventListener('change', () => ed.update({ side: form.side.value }));
+    form.querySelectorAll('[name="nade"]').forEach(r => r.addEventListener('change', () => ed.update({ nade: form.nade.value })));
+
     el.querySelector('[data-act="cancel"]').onclick = () => close();
     form.addEventListener('submit', async e => {
       e.preventDefault();
@@ -222,6 +239,7 @@ export function editLineup(existing, defaults = {}) {
         description: form.description.value.trim(),
         video_url: form.video_url.value.trim(),
         images,
+        spot,
         created_by: existing?.created_by || team.me,
       };
       try {

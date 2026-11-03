@@ -5,6 +5,7 @@ import {
   lineup, member, memberTag, memberColor, tactic,
 } from './core.js';
 import { pickLineups, openLineup } from './lineups.js';
+import { radarStatic } from './radar.js';
 
 const ui = { map: store.get('cs.map') || MAPS[0].id, side: store.get('cs.side') || 'T', archived: false };
 const KIND_ORDER = ['pistol', 'eco', 'force', 'full', 'any'];
@@ -57,6 +58,7 @@ export function roleBlock(role, { mine = false, big = false } = {}) {
     <div class="role-head"><span class="role-name">${esc(role.name || 'Rola')}</span>${memberTag(m)}</div>
     ${role.position ? `<div class="role-pos">📍 ${esc(role.position)}</div>` : ''}
     ${role.task ? `<div class="role-task">${esc(role.task)}</div>` : ''}
+    ${big && lus.length ? radarStatic(lus[0].map, lus, { cls: 'role-radar' }) : ''}
     ${lus.length ? `<div class="role-lus">${lus.map(l => {
       const img = l.images?.[0];
       return `<button type="button" class="role-lu" data-open-lineup="${esc(l.id)}">
