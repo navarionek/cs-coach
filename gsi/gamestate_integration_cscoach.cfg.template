@@ -1,0 +1,22 @@
+"CS Coach"
+{
+	"uri"		"https://qnhzbnofloghyhbmkvnq.supabase.co/functions/v1/cs-gsi"
+	"timeout"	"5.0"
+	"buffer"	"0.5"
+	"throttle"	"1.0"
+	"heartbeat"	"60.0"
+	"auth"
+	{
+		"token"	"TEAM_TOKEN"
+	}
+	"data"
+	{
+		"provider"		"1"
+		"map"			"1"
+		"map_round_wins"	"1"
+		"round"			"1"
+		"player_id"		"1"
+		"player_state"		"1"
+		"player_match_stats"	"1"
+	}
+}
