@@ -247,7 +247,7 @@ export function editLineup(existing, defaults = {}) {
         video_url: form.video_url.value.trim(),
         images,
         spot,
-        setpos: existing?.setpos || null,
+        setpos: l.setpos || null,
         created_by: existing?.created_by || team.me,
       };
       try {

@@ -83,6 +83,8 @@ function writeCfgs() {
     // Screenshots keep the crosshair but drop the rest of the HUD and the gun.
     'cl_draw_only_deathnotices 1', 'r_drawviewmodel 0',
     'bind F5 "exec grankoback"', 'bind F6 "exec grankopos"', 'bind F7 "exec grankoshot"', 'bind F8 "exec grankoland"',
+    // F9 is pressed by the recorder itself to run jobs sent from the Granko page.
+    'bind F9 "exec grankojob"',
     'getpos',
   ]);
   w('grankopos', ['getpos']);
@@ -191,6 +193,108 @@ function onLand(p) {
   });
 }
 
+// --- remote jobs from the Granko page ("Podgląd" tab) ---
+// The radar gives x/y but no height, so every position the game reports is kept per map in
+// zcache.json; a teleport drops the player from just above the nearest known spot.
+
+const ZCACHE = path.join(HERE, 'zcache.json');
+const zcache = fs.existsSync(ZCACHE) ? JSON.parse(fs.readFileSync(ZCACHE, 'utf8')) : {};
+const DEFAULT_DROP = { de_ancient: 300, de_inferno: 350, de_nuke: -150, de_nuke_lower: -560 };
+
+function addSample(p) {
+  const list = (zcache[state.map] ||= []);
+  if (list.some(s => Math.hypot(s[0] - p.x, s[1] - p.y) < 64 && Math.abs(s[2] - p.z) < 48)) return;
+  list.push([Math.round(p.x), Math.round(p.y), Math.round(p.z)]);
+  fs.writeFileSync(ZCACHE, JSON.stringify(zcache));
+}
+
+function dropHeight(map, x, y, level) {
+  const o = OVERVIEWS[map];
+  const lower = o.lowerBelow != null && level === 'lower';
+  const samples = (zcache[map] || []).filter(s => o.lowerBelow == null || (s[2] < o.lowerBelow) === lower);
+  const near = samples.map(s => ({ s, d: Math.hypot(s[0] - x, s[1] - y) })).sort((a, b) => a.d - b.d);
+  if (near[0] && near[0].d < 400) return near[0].s[2] + 72;
+  const around = near.filter(n => n.d < 2000);
+  if (around.length) return Math.max(...around.map(n => n.s[2])) + 150;
+  return DEFAULT_DROP[lower ? `${map}_lower` : map] ?? 300;
+}
+
+let jobWaiter = null;
+function jobPos(p) { jobWaiter?.(p); jobWaiter = null; }
+
+// Writes the commands into grankojob.cfg and presses F9; resolves with the getpos that ends it.
+async function runJob(lines, timeoutMs = 4000) {
+  fs.writeFileSync(path.join(CFG, 'grankojob.cfg'), [...lines, 'getpos'].join('\n') + '\n');
+  for (let i = 0; i < 2; i++) {
+    const got = new Promise(resolve => { jobWaiter = resolve; setTimeout(() => resolve(null), timeoutMs); });
+    execFileSync('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(HERE, 'keys.ps1'), '-Vk', '0x78']);
+    const p = await got;
+    if (p) return p;
+  }
+  throw new Error('Gra nie wykonała polecenia (otwarte menu albo konsola?)');
+}
+
+async function changeMap(map) {
+  console.log(`  → zmiana mapy na ${map}`);
+  const from = logSize();
+  fs.writeFileSync(path.join(CFG, 'grankojob.cfg'), `map ${map}\n`);
+  execFileSync('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(HERE, 'keys.ps1'), '-Vk', '0x78']);
+  if (!await waitFor(new RegExp(`Host activate: Loading \\(${map}\\)`), 120e3, from)) throw new Error(`Nie udało się załadować ${map}`);
+  state.map = map;
+  await sleep(8000);
+  await runJob(['exec granko'], 6000);
+}
+
+async function teleportJob(payload) {
+  const { map, at, look } = payload;
+  const o = OVERVIEWS[map];
+  if (!o) throw new Error(`Mapa ${map} nie ma kalibracji radaru`);
+  if (state.map !== map) await changeMap(map);
+  const world = f => ({ x: Math.round(o.x + f.x * 1024 * o.scale), y: Math.round(o.y - f.y * 1024 * o.scale) });
+  const p = world(at);
+  const z = Math.round(dropHeight(map, p.x, p.y, at.level || 'main'));
+  let yaw = 90;
+  if (look) {
+    const q = world(look);
+    yaw = Math.round(Math.atan2(q.y - p.y, q.x - p.x) * 1800 / Math.PI) / 10;
+  }
+  await runJob([`setpos ${p.x} ${p.y} ${z}`, `setang 2 ${yaw} 0`]);
+  await sleep(1300); // fall to the floor
+  const landed = await runJob([]);
+  await sleep(250);
+  const image = await upload(grab());
+  const setpos = `setpos ${landed.x} ${landed.y} ${landed.z};setang ${landed.pitch} ${landed.yaw} 0`;
+  return { image, setpos, z: landed.z, map, at: toRadar(map, landed.x, landed.y, landed.z) };
+}
+
+async function agentLoop() {
+  let busy = false;
+  setInterval(async () => {
+    if (busy) return;
+    busy = true;
+    try {
+      const job = await rpc('agent_take', { p_map: state.map, p_info: { side: state.side, version: 1 } });
+      if (job) {
+        console.log(`  ⇢ zadanie ze strony #${job.id}: ${job.kind}`);
+        try {
+          const result = await teleportJob(job.payload);
+          await rpc('agent_finish', { job_id: job.id, ok: true, p_result: result });
+          beep('ok');
+          console.log(`  ✓ #${job.id} gotowe (${result.setpos})`);
+        } catch (err) {
+          await rpc('agent_finish', { job_id: job.id, ok: false, p_result: { error: err.message } });
+          beep('err');
+          console.log(`  ✗ #${job.id}: ${err.message}`);
+        }
+      }
+    } catch (err) {
+      console.log(`  (brak połączenia z Granko: ${err.message})`);
+    } finally {
+      busy = false;
+    }
+  }, 900);
+}
+
 // --- console.log follower ---
 
 function follow() {
@@ -216,13 +320,15 @@ function follow() {
         console.log(`Mapa: ${state.map}`);
       } else if ((m = line.match(/<\[U:1:\d+\]><(CT|TERRORIST|T)>/))) {
         state.side = m[1] === 'CT' ? 'CT' : 'T';
-      } else if ((m = line.match(/execing (grankopos|grankoshot|grankoland)\b/))) {
+      } else if ((m = line.match(/execing (grankopos|grankoshot|grankoland|grankojob)\b/))) {
         pending = m[1];
-      } else if (pending && (m = line.match(/setpos\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+);\s*setang\s+(-?[\d.]+)\s+(-?[\d.]+)/))) {
+      } else if ((m = line.match(/setpos\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+);\s*setang\s+(-?[\d.]+)\s+(-?[\d.]+)/))) {
         const p = { x: +(+m[1]).toFixed(2), y: +(+m[2]).toFixed(2), z: +(+m[3]).toFixed(2), pitch: +(+m[4]).toFixed(2), yaw: +(+m[5]).toFixed(2) };
+        addSample(p);
         if (pending === 'grankopos') onPos(p);
         else if (pending === 'grankoshot') onShot();
-        else onLand(p);
+        else if (pending === 'grankoland') onLand(p);
+        else if (pending === 'grankojob') jobPos(p);
         pending = null;
       }
     }
@@ -276,6 +382,7 @@ async function main() {
     await sleep(8000); // let the player spawn before the cheats/bot commands
   }
   follow();
+  agentLoop();
   // The console key can land while a menu is open; check the log and try again.
   let ok = false;
   for (let i = 0; i < 3 && !ok; i++) {
@@ -291,6 +398,7 @@ Gotowe. W grze:
   F7  po rzucie: screen efektu
   F8  stań tam, gdzie granat wylądował: punkt na radarze
   F5  powrót na ostatnią pozycję z F6
+Zakładka „Podgląd” w Granko też działa: klik na radarze teleportuje cię tutaj i wysyła screena (F9 wciska recorder).
 Każdy zapis potwierdza krótki dźwięk. Wszystko ląduje w Granko (Line-upy), uzupełnij tam nazwę i rodzaj granatu.
 Na koniec w konsoli: exec grankooff (przywraca HUD i broń). Ctrl+C zamyka recorder.
 `);

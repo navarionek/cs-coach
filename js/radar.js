@@ -283,7 +283,8 @@ export function mountLineupMap(el, { map, lineups, onOpen }) {
 }
 
 // Two-click lineup spot editor: first where you stand, then where it lands. Calls onChange(spot|null).
-export function mountSpotEditor(el, { map, spot, nade, side, onChange }) {
+// `labels` ({from, to, hintFrom, hintTo}) renames the two modes, e.g. for the game preview.
+export function mountSpotEditor(el, { map, spot, nade, side, onChange, labels = {} }) {
   let cur = spot ? structuredClone(spot) : {};
   let level = cur.from?.level || radarsFor(map)[0]?.level || 'main';
   let mode = cur.from && !cur.to ? 'to' : 'from';
@@ -297,12 +298,12 @@ export function mountSpotEditor(el, { map, spot, nade, side, onChange }) {
     const L = lineupLayer([{ id: 'edit', nade, side, title: 'ten line-up', spot: cur }], level);
     el.innerHTML = `
       <div class="spot-bar">
-        ${segmented('smode', [['from', '📍 Skąd rzucasz'], ['to', `${NADES[nade]?.icon || '💥'} Gdzie ląduje`]], mode)}
+        ${segmented('smode', [['from', labels.from || '📍 Skąd rzucasz'], ['to', labels.to || `${NADES[nade]?.icon || '💥'} Gdzie ląduje`]], mode)}
         ${levelSwitch(map, level, 'slevel')}
         ${cur.from || cur.to ? '<button type="button" class="btn small ghost" data-act="clear">Wyczyść</button>' : ''}
       </div>
       ${radarBox(map, level, { svg: L.svg, marks: L.marks, cls: 'pick', zoom: true })}
-      <p class="muted small">${mode === 'from' ? 'Kliknij miejsce, w którym stoisz przy rzucie.' : 'Kliknij, gdzie granat ma wylądować.'} Kółko myszy lub dwa palce przybliżają, przeciąganie przesuwa mapę.</p>`;
+      <p class="muted small">${mode === 'from' ? (labels.hintFrom || 'Kliknij miejsce, w którym stoisz przy rzucie.') : (labels.hintTo || 'Kliknij, gdzie granat ma wylądować.')} Kółko myszy lub dwa palce przybliżają, przeciąganie przesuwa mapę.</p>`;
     bindSegmented(el, 'smode', v => { mode = v; draw(); });
     bindSegmented(el, 'slevel', v => { level = v; draw(); });
     el.querySelector('[data-act="clear"]')?.addEventListener('click', () => { cur = {}; mode = 'from'; onChange(null); draw(); });

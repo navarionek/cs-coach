@@ -40,3 +40,9 @@ Recorder odpala CS2 offline (z `-condebug`), sam wpisuje `exec granko` (cheaty, 
 - **F5** – powrót na ostatnią pozycję z F6.
 
 CS2 nie ma zdalnej konsoli, więc klawisze odpalają małe cfg (`grankopos` itd.), a ich `execing …` i `getpos` widać w logu. Na koniec `exec grankooff` przywraca HUD i broń.
+
+### Podgląd ze strony (zdalne sterowanie)
+
+Gdy Recorder działa, zakładka **Podgląd** w Granko (z dowolnego urządzenia, także z telefonu) może nim sterować: klikasz na radarze „Stań tu” i opcjonalnie „Patrz tam”, wciskasz **Pokaż w grze**, a PC z CS2 teleportuje postać i odsyła screena (z teleportem do skopiowania i opcją „Zapisz jako line-up”).
+
+Pod spodem: strona dodaje zadanie do `cs.agent_jobs` (`cs.agent_submit`), Recorder co ~1 s woła `cs.agent_take` (to też jego heartbeat w `cs.agent`), wpisuje komendy do `grankojob.cfg`, sam wciska **F9** i odsyła wynik przez `cs.agent_finish`. Radar nie zna wysokości, więc postać spada z niewielkiej wysokości nad najbliższym znanym punktem; każda pozycja z gry trafia do `recorder/zcache.json`, więc z czasem trafia coraz lepiej. Jeśli zadanie jest na inną mapę, Recorder sam ją zmienia.

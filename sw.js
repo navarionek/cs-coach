@@ -1,6 +1,6 @@
 // Network-first: the app is always fresh online, the cache is only an offline fallback.
 // Bump the version when the ASSETS list changes.
-const CACHE_NAME = 'granko-v5';
+const CACHE_NAME = 'granko-v6';
 const ASSETS = [
   './',
   './index.html',
@@ -13,6 +13,7 @@ const ASSETS = [
   './js/tactics.js',
   './js/lineups.js',
   './js/radar.js',
+  './js/preview.js',
   './manifest.json',
   './icon-192x192.png',
   './icon-512x512.png',

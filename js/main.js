@@ -5,8 +5,9 @@ import { initStats } from './stats.js';
 import { renderTactics } from './tactics.js';
 import { renderLineups } from './lineups.js';
 import { renderLive, startLive, stopLive } from './live.js';
+import { renderPreview, startPreview, stopPreview } from './preview.js';
 
-const TEAM_TABS = { live: renderLive, tactics: renderTactics, lineups: renderLineups };
+const TEAM_TABS = { live: renderLive, tactics: renderTactics, lineups: renderLineups, preview: renderPreview };
 let current = store.get('cs.tab') || 'live';
 
 function panel(tab) {
@@ -21,6 +22,7 @@ function show(tab) {
   // The live tab shows the same game in detail, so the "playing now" strip would only repeat it.
   document.getElementById('live').classList.toggle('on-live-tab', tab === 'live');
   if (tab !== 'live') stopLive();
+  if (tab !== 'preview') stopPreview();
   if (tab === 'team') { renderTeam(panel('team')); return; }
   const render = TEAM_TABS[tab];
   if (!render) return;
@@ -30,12 +32,13 @@ function show(tab) {
   }
   render(panel(tab));
   if (tab === 'live') startLive();
+  if (tab === 'preview') startPreview();
 }
 
 document.querySelectorAll('.tab').forEach(b => b.addEventListener('click', () => show(b.dataset.tab)));
 
 // Playbook changed (saved here or reloaded): redraw the open team tab under any modal.
-on('playbook', () => { if (TEAM_TABS[current] && !needsGate()) TEAM_TABS[current](panel(current)); });
+on('playbook', () => { if (TEAM_TABS[current] && current !== 'preview' && !needsGate()) TEAM_TABS[current](panel(current)); });
 on('callstats', () => { if (current === 'tactics' && !needsGate()) renderTactics(panel('tactics')); });
 
 initStats();

@@ -1,5 +1,6 @@
-param([string]$Exec, [string]$Beep)
+param([string]$Exec, [string]$Beep, [int]$Vk = 0)
 # -Exec <cfg>: focuses CS2 and types "exec <cfg>" into the console (key under Esc), like a person would.
+# -Vk <code>: focuses CS2 and presses one key (F9 runs the recorder's job cfg).
 # -Beep ok|err: short confirmation sound for the recorder.
 if ($Beep) {
   if ($Beep -eq 'ok') { [console]::Beep(1046, 90); [console]::Beep(1568, 120) } else { [console]::Beep(330, 300) }
@@ -34,6 +35,7 @@ $h = (Get-Process cs2 -ErrorAction Stop | Where-Object { $_.MainWindowHandle -ne
 [GrankoKb]::ShowWindow($h, 9) | Out-Null
 [GrankoKb]::SetForegroundWindow($h) | Out-Null
 Start-Sleep -Milliseconds 600
+if ($Vk) { [GrankoKb]::Tap([uint16]$Vk); exit }
 $console = 0xC0
 [GrankoKb]::Tap($console); Start-Sleep -Milliseconds 500
 # Letters and spaces only (cfg names are kept to [a-z]), so no shift handling is needed.

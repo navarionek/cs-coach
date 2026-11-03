@@ -7,3 +7,6 @@ team-key.txt
 
 # Granko Recorder config with the team password.
 recorder/config.json
+
+# Height samples the recorder learns per map.
+recorder/zcache.json
