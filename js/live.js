@@ -6,6 +6,7 @@ import {
 } from './core.js';
 import { roleBlock, bindRoleLineups, recordText } from './tactics.js';
 import { mountPlan, hasPlan } from './radar.js';
+import { voice, voiceSupported, setVoice, announce, speak, callText } from './voice.js';
 
 const POLL_MS = 3000;
 const FRESH_MS = 90e3;          // GSI heartbeat is 60 s
@@ -288,6 +289,7 @@ function draw(force = false) {
       </div>
       <div class="lh-score"><span class="us">${ctx.us}</span><span class="sep">:</span><span>${ctx.them}</span></div>
       ${sideBadge(ctx.side)}
+      ${voiceSupported ? `<button type="button" class="btn small voice-btn ${voice.on ? 'on' : ''}" data-act="voice" title="Czytaj na głos taktykę i twoje zadanie">${voice.on ? '🔊 Głos' : '🔇 Głos'}</button>` : ''}
       ${ctx.practice ? `<div class="practice-bar">
         ${segmented('psid', [['T', 'T'], ['CT', 'CT']], ctx.side)}
         ${segmented('pecon', [['eco', 'Eco'], ['force', 'Force'], ['full', 'Full']], L.practice.econ)}
@@ -304,6 +306,7 @@ function draw(force = false) {
           <h2>${esc(x.name)}</h2>
           ${x.summary ? `<p class="lead">${esc(x.summary)}</p>` : ''}
           ${x.notes ? `<p class="notes">${esc(x.notes)}</p>` : ''}
+          ${voiceSupported ? '<button type="button" class="btn small ghost" data-act="say">🔁 Powtórz na głos</button>' : ''}
           <div class="muted small">${call.auto ? '🤖 wybrana automatycznie' : `📣 call: ${esc(caller?.name || '?')}`} · ${recordText(x.id)}</div>`
         : sugg.length ? '<h2 class="muted">Wybieram taktykę…</h2>'
         : `<h2 class="muted">Brak taktyk na ${esc(mapName(ctx.map))} jako ${ctx.side}</h2><p class="muted">Dodaj je w zakładce Taktyki.</p>`}
@@ -340,6 +343,18 @@ function draw(force = false) {
   L.el.querySelector('[data-act="change"]')?.addEventListener('click', () => openPicker(ctx, sugg));
   L.el.querySelectorAll('[data-play]').forEach(b => b.addEventListener('click', () => callTactic(b.dataset.play)));
   if (ctx.practice) bindPractice();
+
+  announce(ctx, call, x, myRole);
+  L.el.querySelector('[data-act="voice"]')?.addEventListener('click', () => {
+    setVoice(!voice.on);
+    // Turning it on is a click, which also unlocks audio: read the current call right away.
+    voice.lastId = null;
+    announce(ctx, call, x, myRole);
+    draw(true);
+  });
+  L.el.querySelector('[data-act="say"]')?.addEventListener('click', () => {
+    speak(callText({ round: ctx.round, econ: ctx.econ, tactic: x, role: myRole }));
+  });
 }
 
 function suggRow(s, i, call) {
