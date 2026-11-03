@@ -200,6 +200,14 @@ function onLand(p) {
 const ZCACHE = path.join(HERE, 'zcache.json');
 const zcache = fs.existsSync(ZCACHE) ? JSON.parse(fs.readFileSync(ZCACHE, 'utf8')) : {};
 const DEFAULT_DROP = { de_ancient: 300, de_inferno: 350, de_nuke: -150, de_nuke_lower: -560 };
+// Spawn points from the map files (js/mapdata.js) are known-good heights from the start.
+const SPAWN_SAMPLES = (() => {
+  try {
+    const src = fs.readFileSync(path.join(HERE, '..', 'js', 'mapdata.js'), 'utf8');
+    const spawns = JSON.parse(src.match(/export const SPAWNS = (\{.*\});/s)[1]);
+    return Object.fromEntries(Object.entries(spawns).map(([m, s]) => [m, [...s.T, ...s.CT].map(p => p.world)]));
+  } catch { return {}; }
+})();
 
 function addSample(p) {
   const list = (zcache[state.map] ||= []);
@@ -211,7 +219,7 @@ function addSample(p) {
 function dropHeight(map, x, y, level) {
   const o = OVERVIEWS[map];
   const lower = o.lowerBelow != null && level === 'lower';
-  const samples = (zcache[map] || []).filter(s => o.lowerBelow == null || (s[2] < o.lowerBelow) === lower);
+  const samples = [...(zcache[map] || []), ...(SPAWN_SAMPLES[map] || [])].filter(s => o.lowerBelow == null || (s[2] < o.lowerBelow) === lower);
   const near = samples.map(s => ({ s, d: Math.hypot(s[0] - x, s[1] - y) })).sort((a, b) => a.d - b.d);
   if (near[0] && near[0].d < 400) return near[0].s[2] + 72;
   const around = near.filter(n => n.d < 2000);

@@ -2,6 +2,7 @@
 // (where each role walks) and zoom/pan for all of them. Points are 0..1 fractions of the square
 // radar image; Nuke's two floors share one coordinate frame, so a route can go up or down stairs.
 import { team, esc, imageUrl, NADES, segmented, bindSegmented, member } from './core.js';
+import { SPAWNS } from './mapdata.js';
 
 const LEVEL_NAMES = { main: 'Góra', lower: 'Dół' };
 export const NADE_COLORS = { smoke: '#d5deec', flash: '#fff3a3', molotov: '#ff9a5c', he: '#ff7a8c', decoy: '#b5bfcf' };
@@ -26,11 +27,19 @@ function radarImg(map, level) {
   return r ? `<img class="r-img" src="${esc(imageUrl(r.path))}" alt="" draggable="false">` : '';
 }
 
+// Spawn points under everything else, so routes and lineups read from where the round starts.
+function spawnMarks(map, level) {
+  const sp = SPAWNS[map];
+  if (!sp) return '';
+  return [["T", sp.T], ["CT", sp.CT]].flatMap(([side, pts]) => pts.filter(p => p.level === level)
+    .map(p => `<span class="r-spawn ${side.toLowerCase()}" style="left:${n2(p.x * 100)}%;top:${n2(p.y * 100)}%" title="Spawn ${side}"></span>`)).join('');
+}
+
 // One radar box. Everything that zooms lives in .r-stage; the zoom buttons sit outside it.
 function radarBox(map, level, { svg = '', marks = '', cls = '', zoom = false } = {}) {
   return `<div class="radar ${cls}">
     <div class="r-stage">${radarImg(map, level)}
-      <svg class="r-svg" viewBox="0 0 100 100" preserveAspectRatio="none">${svg}</svg>${marks}</div>
+      <svg class="r-svg" viewBox="0 0 100 100" preserveAspectRatio="none">${svg}</svg>${spawnMarks(map, level)}${marks}</div>
     ${zoom ? `<div class="r-zoom"><button type="button" data-z="in" aria-label="Przybliż">+</button>
       <button type="button" data-z="out" aria-label="Oddal">−</button><button type="button" data-z="reset" aria-label="Cała mapa">⟲</button></div>` : ''}
   </div>`;

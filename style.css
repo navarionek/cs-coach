@@ -551,3 +551,8 @@ label { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color:
 @media (max-width: 860px) { .pv-grid { grid-template-columns: 1fr; } }
 .voice-btn.on { background: rgba(61, 220, 151, .15); color: var(--win); border-color: rgba(61, 220, 151, .35); }
 .call [data-act="say"] { margin: 0 0 8px; }
+/* Spawn points: small squares in side colors, below every other marker. */
+.r-spawn { position: absolute; width: 7px; height: 7px; border-radius: 2px; transform: translate(-50%, -50%) scale(calc(1 / var(--z))); pointer-events: none; opacity: .85; box-shadow: 0 0 0 1px rgba(0, 0, 0, .6); }
+.r-spawn.t { background: var(--t); }
+.r-spawn.ct { background: var(--ct); }
+.radar.mini .r-spawn, .route-row .r-spawn { width: 4px; height: 4px; }
