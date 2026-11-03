@@ -6,7 +6,7 @@ import {
 } from './core.js';
 import { roleBlock, bindRoleLineups, recordText } from './tactics.js';
 import { mountPlan, hasPlan } from './radar.js';
-import { voice, voiceSupported, setVoice, announce, speak, callText } from './voice.js';
+import { voice, voiceSupported, setVoice, setEngine, announce, speak, callParts, VOICE_OPTIONS } from './voice.js';
 
 const POLL_MS = 3000;
 const FRESH_MS = 90e3;          // GSI heartbeat is 60 s
@@ -289,7 +289,7 @@ function draw(force = false) {
       </div>
       <div class="lh-score"><span class="us">${ctx.us}</span><span class="sep">:</span><span>${ctx.them}</span></div>
       ${sideBadge(ctx.side)}
-      ${voiceSupported ? `<button type="button" class="btn small voice-btn ${voice.on ? 'on' : ''}" data-act="voice" title="Czytaj na głos taktykę i twoje zadanie">${voice.on ? '🔊 Głos' : '🔇 Głos'}</button>` : ''}
+      ${voiceSupported ? `<button type="button" class="btn small voice-btn ${voice.on ? 'on' : ''}" data-act="voice" title="Czytaj na głos taktykę i twoje zadanie">${voice.on ? '🔊 Głos' : '🔇 Głos'}</button>${voice.on ? `<select class="voice-sel" data-act="engine" title="Głos">${VOICE_OPTIONS.map(([v, n]) => `<option value="${v}" ${v === voice.engine ? 'selected' : ''}>${n}</option>`).join('')}</select>` : ''}` : ''}
       ${ctx.practice ? `<div class="practice-bar">
         ${segmented('psid', [['T', 'T'], ['CT', 'CT']], ctx.side)}
         ${segmented('pecon', [['eco', 'Eco'], ['force', 'Force'], ['full', 'Full']], L.practice.econ)}
@@ -352,8 +352,12 @@ function draw(force = false) {
     announce(ctx, call, x, myRole);
     draw(true);
   });
+  L.el.querySelector('[data-act="engine"]')?.addEventListener('change', e => {
+    setEngine(e.target.value);
+    if (x) speak(callParts({ round: ctx.round, econ: ctx.econ, tactic: x, role: myRole }));
+  });
   L.el.querySelector('[data-act="say"]')?.addEventListener('click', () => {
-    speak(callText({ round: ctx.round, econ: ctx.econ, tactic: x, role: myRole }));
+    speak(callParts({ round: ctx.round, econ: ctx.econ, tactic: x, role: myRole }));
   });
 }
 
