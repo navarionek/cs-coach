@@ -6,8 +6,11 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 
 const BUCKET = "cs-lineups";
 const MAX_CHARS = 600;
-// ElevenLabs' multilingual premade voices; they speak Polish with language_code "pl".
+// Premade multilingual voices speak Polish with language_code "pl"; Voice Library voices (piotr)
+// need a paid ElevenLabs plan for API use (the free plan answers 402).
 const VOICES: Record<string, string> = {
+  // "Piotr - Engaging, Reassuring Storyteller" from the Voice Library, a native Polish narrator.
+  piotr: "o2xdfKUpc1Bwq7RchZuW",
   brian: "nPczCjzI2devNBz1zQrb",
   adam: "pNInz6obpgDQGcFmaJgB",
   george: "JBFqnCBsd6RMkjVDRZzb",
@@ -60,7 +63,7 @@ Deno.serve(async (req) => {
   if (!res.ok) {
     const detail = await res.text();
     console.error("elevenlabs", res.status, detail);
-    return json({ error: `ElevenLabs ${res.status}` }, 502);
+    return json({ error: res.status === 402 ? `Głos ${voice} wymaga płatnego planu ElevenLabs` : `ElevenLabs ${res.status}` }, 502);
   }
   const audio = new Uint8Array(await res.arrayBuffer());
   const { error } = await db.storage.from(BUCKET).upload(path, audio, { contentType: "audio/mpeg", upsert: true });

@@ -6,6 +6,7 @@ import { store, team, KINDS, NADES, lineup, SUPABASE_URL } from './core.js';
 
 export const voiceSupported = 'speechSynthesis' in window || 'Audio' in window;
 export const VOICE_OPTIONS = [
+  ['ai:piotr', 'AI · Piotr (płatny plan)'],
   ['ai:brian', 'AI · Brian'],
   ['ai:adam', 'AI · Adam'],
   ['ai:george', 'AI · George'],
