@@ -256,3 +256,19 @@ document.querySelectorAll('.tab').forEach(b => b.addEventListener('click', () =>
 
 load();
 setInterval(load, 20000);
+// An installed PWA resumed from the background doesn't reload, so refresh right away.
+document.addEventListener('visibilitychange', () => { if (!document.hidden) load(); });
+
+if ('serviceWorker' in navigator) {
+  // A new SW took over: reload to pick up the new code (not on the very first install).
+  const hadController = !!navigator.serviceWorker.controller;
+  let reloading = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController || reloading) return;
+    reloading = true;
+    window.location.reload();
+  });
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch(err => console.warn('SW registration failed:', err));
+  });
+}
