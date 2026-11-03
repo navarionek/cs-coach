@@ -44,7 +44,7 @@ export const store = {
 };
 
 // Team session: the key unlocks the playbook, `me` is which member this device belongs to.
-export const team = { key: store.get('cs.teamKey'), me: store.get('cs.me'), playbook: null, callStats: {} };
+export const team = { key: store.get('cs.teamKey'), me: store.get('cs.me'), playbook: null, callStats: {}, callHistory: [] };
 
 const bus = new EventTarget();
 export const emit = (name, detail) => bus.dispatchEvent(new CustomEvent(name, { detail }));
@@ -64,8 +64,10 @@ export async function loadPlaybook() {
 
 // Win/loss per tactic from every called round that has a result.
 export async function loadCallStats() {
-  const { data, error } = await sb.from('calls').select('tactic_id,won').not('won', 'is', null).limit(5000);
+  const { data, error } = await sb.from('calls').select('tactic_id,won,created_at,econ,enemy_econ').not('won', 'is', null).limit(5000);
   if (error) return;
+  // Raw rows feed the brain (decay, per enemy economy); stats are the simple totals.
+  team.callHistory = data;
   const stats = {};
   for (const c of data) {
     const s = (stats[c.tactic_id] ||= { w: 0, n: 0 });

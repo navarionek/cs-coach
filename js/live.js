@@ -6,6 +6,7 @@ import {
 } from './core.js';
 import { roleBlock, bindRoleLineups, recordText } from './tactics.js';
 import { mountPlan, hasPlan } from './radar.js';
+import { suggest, economy } from './brain.js';
 import { voice, voiceSupported, setVoice, setEngine, announce, speak, callParts, VOICE_OPTIONS } from './voice.js';
 
 const POLL_MS = 3000;
@@ -49,7 +50,7 @@ function freshStates() {
 function gameContext() {
   if (L.practice) {
     const p = L.practice;
-    return { ...p, practice: true, phase: 'freezetime', players: [], econ: p.round === 1 || p.round === 13 ? 'pistol' : p.econ };
+    return { ...p, practice: true, phase: 'freezetime', players: [], econ: p.round === 1 || p.round === 13 ? 'pistol' : null };
   }
   const fresh = freshStates();
   const mine = fresh.find(s => s.steamid === member(team.me)?.steamid) || fresh[0];
@@ -109,56 +110,19 @@ function matchHistory(ctx) {
   });
 }
 
-const KIND_RANK = { eco: 0, force: 1, full: 2 };
-
-// Scores every active tactic for this map/side. Deterministic, so all five pages agree.
-export function suggest(ctx, history) {
-  if (!ctx) return [];
-  const pool = team.playbook.tactics.filter(x => !x.archived && x.map === ctx.map && x.side === ctx.side);
-  const last = history.at(-1);
-  let lossStreak = 0;
-  for (let i = history.length - 1; i >= 0 && history[i].won === false; i--) lossStreak++;
-
-  return pool.map(x => {
-    let score = 0;
-    const why = [];
-    if (ctx.econ === 'pistol' || x.kind === 'pistol') {
-      if (ctx.econ === x.kind) { score += 60; why.push('runda pistoletowa'); }
-      else { score -= 80; why.push(ctx.econ === 'pistol' ? 'to runda pistoletowa' : 'tylko na pistolet'); }
-    } else if (x.kind === 'any') {
-      score += 20;
-    } else if (!ctx.econ) {
-      score += 10;
-    } else if (x.kind === ctx.econ) {
-      score += 50; why.push(`pasuje do kasy (${KINDS[ctx.econ]})`);
-    } else if (KIND_RANK[x.kind] > KIND_RANK[ctx.econ]) {
-      score -= 60; why.push(`za mało kasy (macie na ${KINDS[ctx.econ]})`);
-    } else {
-      score -= 15; why.push(`stać was na więcej (${KINDS[ctx.econ]})`);
-    }
-
-    const s = team.callStats[x.id];
-    if (s?.n) {
-      score += Math.round(((s.w + 1) / (s.n + 2) - 0.5) * 60);
-      why.push(`ogólnie ${recordText(x.id)}`);
-    } else {
-      score += 5; why.push('jeszcze nie grana');
-    }
-
-    const used = history.filter(h => h.tactic_id === x.id);
-    if (used.length) {
-      const w = used.filter(h => h.won).length;
-      score += w * 12 - (used.length - w) * 18;
-      why.push(`w tym meczu ${w}/${used.length}`);
-      if (used.length >= 3) { score -= 10 * (used.length - 2); why.push('mogli ją już rozczytać'); }
-    }
-    if (last?.tactic_id === x.id) {
-      if (last.won) { score += 8; why.push('weszła w poprzedniej rundzie'); }
-      else { score -= 30; why.push('nie weszła w poprzedniej rundzie'); }
-    }
-    if (lossStreak >= 2 && !used.length) { score += 15; why.push(`${lossStreak} przegrane z rzędu, pora coś zmienić`); }
-    return { tactic: x, score, why };
-  }).sort((a, b) => b.score - a.score || a.tactic.name.localeCompare(b.tactic.name));
+// The brain's view of the next round: our buy, the enemy's likely buy and the ranked tactics.
+// Sets ctx.econ / ctx.enemy so calls, the header and the voice all use the same numbers.
+function plan(ctx) {
+  const history = matchHistory(ctx);
+  if (!ctx) return { history, model: null, sugg: [] };
+  const model = economy(ctx, history);
+  if (ctx.practice && L.practice.econ !== 'auto' && model.rec !== 'pistol') {
+    model.rec = L.practice.econ;
+    model.recWhy = ['ustawione ręcznie w treningu'];
+  }
+  ctx.econ = model.rec;
+  ctx.enemy = model.enemy;
+  return { history, model, sugg: suggest(ctx, history, model) };
 }
 
 async function poll() {
@@ -203,14 +167,14 @@ function maybeAutoCall() {
   if (!ctx || ctx.practice || L.autoCalling) return;
   if (!['warmup', 'freezetime', 'over', 'intermission'].includes(ctx.phase)) return;
   if (callFor(ctx)) return;
-  const top = suggest(ctx, matchHistory(ctx))[0];
+  const top = plan(ctx).sugg[0];
   if (!top) return;
   L.autoCalling = true;
   setTimeout(async () => {
     try {
       const again = gameContext();
       if (again && again.round === ctx.round && !callFor(again)) {
-        await rpc('make_call', { p_map: ctx.map, p_side: ctx.side, p_round: ctx.round, p_tactic: top.tactic.id, p_by: team.me, p_auto: true });
+        await rpc('make_call', { p_map: ctx.map, p_side: ctx.side, p_round: ctx.round, p_tactic: top.tactic.id, p_by: team.me, p_auto: true, p_econ: ctx.econ, p_enemy: ctx.enemy });
         await poll();
       }
     } catch (err) {
@@ -230,7 +194,8 @@ async function callTactic(tacticId) {
     return;
   }
   try {
-    await rpc('make_call', { p_map: ctx.map, p_side: ctx.side, p_round: ctx.round, p_tactic: tacticId, p_by: team.me, p_auto: false });
+    plan(ctx);
+    await rpc('make_call', { p_map: ctx.map, p_side: ctx.side, p_round: ctx.round, p_tactic: tacticId, p_by: team.me, p_auto: false, p_econ: ctx.econ, p_enemy: ctx.enemy });
     await poll();
   } catch (err) {
     toast(err.message, 'err');
@@ -257,8 +222,7 @@ function drawEcon(ctx) {
 function draw(force = false) {
   if (!L.el || !team.playbook) return;
   const ctx = gameContext();
-  const history = matchHistory(ctx);
-  const sugg = suggest(ctx, history);
+  const { history, model, sugg } = plan(ctx);
   const call = callFor(ctx);
   const x = call && tactic(call.tactic_id);
   const sig = JSON.stringify([ctx && { ...ctx, players: null, power: null }, call?.id, history, sugg.map(s => [s.tactic.id, s.score]), team.me, team.playbook.tactics.length, team.playbook.lineups.length]);
@@ -292,7 +256,7 @@ function draw(force = false) {
       ${voiceSupported ? `<button type="button" class="btn small voice-btn ${voice.on ? 'on' : ''}" data-act="voice" title="Czytaj na głos taktykę i twoje zadanie">${voice.on ? '🔊 Głos' : '🔇 Głos'}</button>${voice.on ? `<select class="voice-sel" data-act="engine" title="Głos">${VOICE_OPTIONS.map(([v, n]) => `<option value="${v}" ${v === voice.engine ? 'selected' : ''}>${n}</option>`).join('')}</select>` : ''}` : ''}
       ${ctx.practice ? `<div class="practice-bar">
         ${segmented('psid', [['T', 'T'], ['CT', 'CT']], ctx.side)}
-        ${segmented('pecon', [['eco', 'Eco'], ['force', 'Force'], ['full', 'Full']], L.practice.econ)}
+        ${segmented('pecon', [['auto', 'Kasa: auto'], ['eco', 'Eco'], ['force', 'Force'], ['full', 'Full']], L.practice.econ)}
         <button type="button" class="btn small win" data-res="1">✓ Wygrana</button>
         <button type="button" class="btn small loss" data-res="0">✗ Przegrana</button>
         <button type="button" class="btn small ghost" data-act="end-practice">Zakończ</button>
@@ -319,6 +283,7 @@ function draw(force = false) {
           : '<p class="muted">Pojawi się, jak będzie wybrana taktyka.</p>'}
       </section>
       ${x && (others.length || hasPlan(x.roles)) ? `<section class="card roles-live"><div class="call-label">PLAN DRUŻYNY</div><div class="plan-slot"></div><div class="roles-grid">${others.map(r => roleBlock(r)).join('')}</div></section>` : ''}
+      ${model ? analysisCard(model) : ''}
       ${sugg.length ? `<section class="card sugg">
         <div class="call-label">PROPOZYCJE</div>
         ${sugg.slice(0, 3).map((s, i) => suggRow(s, i, call)).join('')}
@@ -354,11 +319,20 @@ function draw(force = false) {
   });
   L.el.querySelector('[data-act="engine"]')?.addEventListener('change', e => {
     setEngine(e.target.value);
-    if (x) speak(callParts({ round: ctx.round, econ: ctx.econ, tactic: x, role: myRole }));
+    if (x) speak(callParts({ round: ctx.round, econ: ctx.econ, enemy: ctx.enemy, tactic: x, role: myRole }));
   });
   L.el.querySelector('[data-act="say"]')?.addEventListener('click', () => {
-    speak(callParts({ round: ctx.round, econ: ctx.econ, tactic: x, role: myRole }));
+    speak(callParts({ round: ctx.round, econ: ctx.econ, enemy: ctx.enemy, tactic: x, role: myRole }));
   });
+}
+
+function analysisCard(m) {
+  const row = (who, cat, why) => `<div class="brain-row"><span class="who">${who}</span>${cat ? kindBadge(cat) : '<span class="muted small">?</span>'}<span class="muted small">${why.map(esc).join(' · ')}</span></div>`;
+  return `<section class="card brain">
+    <div class="call-label">ANALIZA RUNDY</div>
+    ${row('Wy', m.rec, m.recWhy)}
+    ${row('Rywal', m.enemy, m.enemyWhy)}
+  </section>`;
 }
 
 function suggRow(s, i, call) {
@@ -366,8 +340,9 @@ function suggRow(s, i, call) {
   return `<div class="sugg-row ${current ? 'current' : ''}">
     <div class="sugg-rank">${i + 1}</div>
     <div class="sugg-main">
-      <div><b>${esc(s.tactic.name)}</b> ${kindBadge(s.tactic.kind)}</div>
-      <div class="muted small">${s.why.slice(0, 3).map(esc).join(' · ')}</div>
+      <div><b>${esc(s.tactic.name)}</b> ${kindBadge(s.tactic.kind)}${s.site ? ` <span class="site-badge">${esc(s.site)}</span>` : ''}</div>
+      <div class="conf"><span style="width:${s.confidence}%"></span></div>
+      <div class="muted small">${s.confidence}% · ${s.why.slice(0, 3).map(esc).join(' · ')}</div>
     </div>
     ${current ? '<span class="muted small">gramy to</span>' : `<button type="button" class="btn small" data-play="${esc(s.tactic.id)}">Zagraj</button>`}
   </div>`;
@@ -412,7 +387,7 @@ function bindIdle() {
   sel('pmap', 'map');
   sel('pside', 'side');
   L.el.querySelector('[data-act="practice"]').onclick = () => {
-    L.practice = { map: pick.map, side: pick.side, round: 1, econ: 'full', us: 0, them: 0, history: [], calls: {} };
+    L.practice = { map: pick.map, side: pick.side, round: 1, econ: 'auto', us: 0, them: 0, history: [], calls: {} };
     draw(true);
   };
 }
@@ -425,7 +400,7 @@ function bindPractice() {
   L.el.querySelectorAll('[data-res]').forEach(b => b.onclick = () => {
     const won = b.dataset.res === '1';
     const c = p.calls[p.round] || (() => {
-      const top = suggest(gameContext(), p.history)[0];
+      const top = plan(gameContext()).sugg[0];
       return top && { tactic_id: top.tactic.id };
     })();
     p.history.push({ round_no: p.round, won, tactic_id: c?.tactic_id || null });
@@ -436,7 +411,7 @@ function bindPractice() {
   });
   // Practice has no shared call: show the top suggestion as the call.
   if (!p.calls[p.round]) {
-    const top = suggest(gameContext(), p.history)[0];
+    const top = plan(gameContext()).sugg[0];
     if (top) { p.calls[p.round] = { id: `p${Date.now()}`, tactic_id: top.tactic.id, side: p.side, auto: true }; draw(true); }
   }
 }

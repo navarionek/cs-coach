@@ -6,6 +6,7 @@ import {
 } from './core.js';
 import { pickLineups, openLineup } from './lineups.js';
 import { hasRadar, planStatic, mountPlan, mountRouteEditor } from './radar.js';
+import { TAGS, tacticSite } from './brain.js';
 
 const ui = { map: store.get('cs.map') || MAPS[0].id, side: store.get('cs.side') || 'T', archived: false };
 const KIND_ORDER = ['pistol', 'eco', 'force', 'full', 'any'];
@@ -45,6 +46,7 @@ function tacticCard(x) {
   return `<button type="button" class="card tac-card" data-tactic="${esc(x.id)}">
     <div class="tac-top"><b>${esc(x.name)}</b><span class="rec ${r.n ? (r.w / r.n >= 0.5 ? 'good' : 'bad') : ''}">${recordText(x.id)}</span></div>
     ${x.summary ? `<p class="muted">${esc(x.summary)}</p>` : ''}
+    ${tacticSite(x) || x.tags?.length ? `<div class="tac-tags">${tacticSite(x) ? `<span class="site-badge">${esc(tacticSite(x))}</span>` : ''}${(x.tags || []).map(t => `<span>${esc(TAGS[x.side]?.[t] || t)}</span>`).join('')}</div>` : ''}
     <div class="tac-roles">${x.roles.map(role => `<span class="role-pill" style="--c:${esc(memberColor(member(role.member_id)))}">${esc(role.name || '?')}${member(role.member_id) ? ` · ${esc(member(role.member_id).name)}` : ''}</span>`).join('')}</div>
     ${nades.length ? `<div class="muted small">${nades.length} granat${nades.length === 1 ? '' : nades.length < 5 ? 'y' : 'ów'}</div>` : ''}
   </button>`;
@@ -132,6 +134,10 @@ export function editTactic(existing) {
         <label>Strona<select name="side">${['T', 'CT'].map(s => `<option ${s === x.side ? 'selected' : ''}>${s}</option>`).join('')}</select></label>
         <label>Na jaką ekonomię<select name="kind">${Object.entries(KINDS).map(([v, n]) => `<option value="${v}" ${v === x.kind ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
       </div>
+      <div class="row2">
+        <label>Cel<select name="site">${[['', 'Auto (z tras i granatów)'], ['A', 'A'], ['B', 'B'], ['mid', 'Mid']].map(([v, n]) => `<option value="${v}" ${v === (x.site || '') ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
+        <div><div class="label muted small">Styl (pomaga mózgowi dobrać taktykę)</div><div class="tag-pick"></div></div>
+      </div>
       <label>Nazwa<input name="name" value="${esc(x.name || '')}" placeholder="np. B split przez banana i CT" maxlength="60" required></label>
       <label>Call w jednym zdaniu<input name="summary" value="${esc(x.summary || '')}" placeholder="np. Szybko B, smoke CT + molotov dark, flash nad bananem" maxlength="140"></label>
       <label>Notatki (timing, plan B, na co uważać)<textarea name="notes" rows="2">${esc(x.notes || '')}</textarea></label>
@@ -144,6 +150,17 @@ export function editTactic(existing) {
     </form>`, { wide: true, dismissable: false });
   const form = el.querySelector('form');
   const rolesEl = el.querySelector('.roles-edit');
+  const tagsEl = el.querySelector('.tag-pick');
+  let tags = new Set(x.tags || []);
+  // Tags depend on the side; switching side keeps only the ones both sides share.
+  const drawTags = () => {
+    const opts = TAGS[form.side.value];
+    tags = new Set([...tags].filter(t => opts[t]));
+    tagsEl.innerHTML = Object.entries(opts).map(([v, n]) => `<label class="tag-opt"><input type="checkbox" value="${v}" ${tags.has(v) ? 'checked' : ''}><span>${n}</span></label>`).join('');
+    tagsEl.querySelectorAll('input').forEach(i => i.addEventListener('change', () => { i.checked ? tags.add(i.value) : tags.delete(i.value); }));
+  };
+  drawTags();
+  form.side.addEventListener('change', drawTags);
 
   // Keep typed text when redrawing after lineup changes.
   function syncRoles() {
@@ -211,6 +228,8 @@ export function editTactic(existing) {
       map: form.map.value,
       side: form.side.value,
       kind: form.kind.value,
+      site: form.site.value || null,
+      tags: [...tags],
       name: form.name.value.trim(),
       summary: form.summary.value.trim(),
       notes: form.notes.value.trim(),

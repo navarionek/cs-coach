@@ -559,3 +559,18 @@ label { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color:
 .voice-sel { width: auto; padding: 5px 8px; font-size: 12px; border-radius: 8px; }
 .cfg-dl { margin: 10px 0 4px; }
 .cfg-dl:empty { display: none; }
+
+/* ---------- tactic brain ---------- */
+.brain .brain-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 6px 0; border-top: 1px solid var(--line); }
+.brain .brain-row:first-of-type { border-top: 0; }
+.brain .who { width: 48px; font-weight: 700; }
+.site-badge { font: 700 10px Inter, sans-serif; padding: 2px 7px; border-radius: 6px; background: rgba(90, 180, 255, .14); color: var(--ct); }
+.conf { height: 4px; border-radius: 2px; background: rgba(255, 255, 255, .06); margin: 5px 0 3px; overflow: hidden; }
+.conf span { display: block; height: 100%; border-radius: 2px; background: linear-gradient(90deg, var(--accent), #ff4d6d); }
+.tag-pick { display: flex; flex-wrap: wrap; gap: 6px; }
+.tag-opt { flex-direction: row; cursor: pointer; }
+.tag-opt input { display: none; }
+.tag-opt span { padding: 5px 10px; border-radius: 999px; border: 1px solid var(--line); font-size: 12px; font-weight: 600; color: var(--muted); }
+.tag-opt input:checked + span { border-color: var(--accent); color: var(--text); background: rgba(255, 138, 61, .12); }
+.tac-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+.tac-tags span { font-size: 10px; font-weight: 600; color: var(--muted); padding: 2px 7px; border-radius: 999px; background: rgba(255, 255, 255, .05); }

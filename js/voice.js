@@ -110,11 +110,12 @@ function coreText(tactic, role) {
   return parts.join(' ');
 }
 
-export function callParts({ round, econ, tactic, role, changed = false }) {
+export function callParts({ round, econ, enemy, tactic, role, changed = false }) {
   return [
     `Runda ${round}.`,
     changed ? 'Zmiana taktyki!' : null,
     econ && KINDS[econ] && econ !== 'any' ? `${KINDS[econ]}.` : null,
+    enemy === 'eco' || enemy === 'force' ? `Rywal pewnie na ${enemy === 'eco' ? 'eco' : 'force buy'}.` : null,
     coreText(tactic, role),
   ];
 }
@@ -123,5 +124,5 @@ export function announce(ctx, call, tactic, role) {
   if (!voice.on || !call || !tactic || voice.lastId === call.id) return;
   const changed = voice.lastRound === ctx.round && voice.lastMap === ctx.map;
   Object.assign(voice, { lastId: call.id, lastRound: ctx.round, lastMap: ctx.map });
-  speak(callParts({ round: ctx.round, econ: ctx.econ, tactic, role, changed }));
+  speak(callParts({ round: ctx.round, econ: ctx.econ, enemy: ctx.enemy, tactic, role, changed }));
 }
