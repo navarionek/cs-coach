@@ -557,3 +557,5 @@ label { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color:
 .r-spawn.ct { background: var(--ct); }
 .radar.mini .r-spawn, .route-row .r-spawn { width: 4px; height: 4px; }
 .voice-sel { width: auto; padding: 5px 8px; font-size: 12px; border-radius: 8px; }
+.cfg-dl { margin: 10px 0 4px; }
+.cfg-dl:empty { display: none; }

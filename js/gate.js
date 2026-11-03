@@ -91,7 +91,8 @@ export function renderGate(el, done) {
 const INSTALL = `<div class="card setup">
   <h2>Jak podpiąć swoją grę</h2>
   <ol>
-    <li>Weź od ziomka plik <code>gamestate_integration_cscoach.cfg</code> (jest w nim token drużyny, nie wrzucaj go nigdzie publicznie).</li>
+    <li>Pobierz plik <code>gamestate_integration_cscoach.cfg</code> przyciskiem poniżej (widać go po wpisaniu hasła drużyny). Jest w nim token drużyny, nie wrzucaj go nigdzie publicznie.
+      <div class="cfg-dl"></div></li>
     <li>Wrzuć go do folderu<br><code>Steam\\steamapps\\common\\Counter-Strike Global Offensive\\game\\csgo\\cfg\\</code><br>
       Najszybciej: Steam → CS2 → prawy klik → Zarządzaj → Przeglądaj pliki lokalne → <code>game\\csgo\\cfg</code>.</li>
     <li>Uruchom CS2 ponownie (gra czyta ten plik tylko przy starcie).</li>
@@ -99,6 +100,24 @@ const INSTALL = `<div class="card setup">
   </ol>
   <p class="muted">To oficjalne Game State Integration od Valve: gra sama wysyła stan meczu. Nic nie czyta pamięci gry, więc VAC i Faceit AC nie mają się do czego przyczepić. Każdy wysyła tylko swoje dane: kasę, kille, dmg, wynik i czas rund.</p>
 </div>`;
+
+const CFG_NAME = 'gamestate_integration_cscoach.cfg';
+
+// The GSI cfg holds the ingest token, so it comes from the key-gated cs.team_file(), not the site.
+async function downloadCfg() {
+  try {
+    const text = await rpc('team_file', { p_name: CFG_NAME });
+    if (!text) throw new Error('Plik nie jest jeszcze wgrany');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([text], { type: 'text/plain' }));
+    a.download = CFG_NAME;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    toast('Pobrano. Wrzuć go do game\\csgo\\cfg i zrestartuj CS2.');
+  } catch (err) {
+    toast(err.message, 'err');
+  }
+}
 
 export async function renderTeam(el) {
   if (needsGate()) {
@@ -133,6 +152,8 @@ export async function renderTeam(el) {
     <p class="muted small">Połączenie z kontem Steam sprawia, że w trybie live widać twoją kasę i HP, a twoje zadanie pojawia się samo.</p>
   </div>` + INSTALL;
 
+  el.querySelector('.cfg-dl').innerHTML = '<button type="button" class="btn primary" data-act="cfg">⬇ Pobierz plik cfg</button>';
+  el.querySelector('[data-act="cfg"]').onclick = downloadCfg;
   el.querySelector('[data-act="switch"]').onclick = () => { setMe(null); renderTeam(el); };
   el.querySelector('[data-act="logout"]').onclick = () => {
     team.key = null; team.playbook = null; store.set('cs.teamKey', null); setMe(null); emit('playbook'); renderTeam(el);
