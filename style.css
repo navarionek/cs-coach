@@ -574,3 +574,9 @@ label { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color:
 .tag-opt input:checked + span { border-color: var(--accent); color: var(--text); background: rgba(255, 138, 61, .12); }
 .tac-tags { display: flex; flex-wrap: wrap; gap: 4px; }
 .tac-tags span { font-size: 10px; font-weight: 600; color: var(--muted); padding: 2px 7px; border-radius: 999px; background: rgba(255, 255, 255, .05); }
+.agent-chip.mid { color: var(--t); background: rgba(255, 181, 71, .1); }
+.agent-chip.mid .dot { background: var(--t); }
+.pc-ctl { margin-bottom: 10px; }
+.pc-ctl:empty { display: none; }
+.pc-ctl p { margin: 4px 0; }
+.spinner.inline { display: inline-block; width: 12px; height: 12px; border-width: 2px; vertical-align: -2px; }

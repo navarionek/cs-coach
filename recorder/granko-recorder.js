@@ -35,7 +35,9 @@ const config = (() => {
   }
   return JSON.parse(fs.readFileSync(file, 'utf8'));
 })();
-const startMap = process.argv[2] || 'de_ancient';
+// --agent: background mode started with Windows; waits for jobs from the page instead of starting CS2.
+const AGENT = process.argv.includes('--agent');
+const startMap = process.argv.slice(2).find(a => !a.startsWith('--')) || 'de_ancient';
 if (!OVERVIEWS[startMap]) {
   console.error(`Nieznana mapa ${startMap}. Dostępne: ${Object.keys(OVERVIEWS).join(', ')}`);
   process.exit(1);
@@ -251,13 +253,13 @@ async function changeMap(map) {
   state.map = map;
   await sleep(8000);
   await runJob(['exec granko'], 6000);
+  cs2.ready = true;
 }
 
 async function teleportJob(payload) {
   const { map, at, look } = payload;
   const o = OVERVIEWS[map];
   if (!o) throw new Error(`Mapa ${map} nie ma kalibracji radaru`);
-  if (state.map !== map) await changeMap(map);
   const world = f => ({ x: Math.round(o.x + f.x * 1024 * o.scale), y: Math.round(o.y - f.y * 1024 * o.scale) });
   const p = world(at);
   const z = Math.round(dropHeight(map, p.x, p.y, at.level || 'main'));
@@ -275,32 +277,120 @@ async function teleportJob(payload) {
   return { image, setpos, z: landed.z, map, at: toRadar(map, landed.x, landed.y, landed.z) };
 }
 
-async function agentLoop() {
-  let busy = false;
-  setInterval(async () => {
-    if (busy) return;
-    busy = true;
+// --- CS2 process state ---
+// off: not running · game: a normal session (no -condebug, never touched) · practice: our offline
+// session, cfg not loaded yet · ready: practice with `exec granko` done (F5-F9 bound).
+
+const cs2 = { pid: null, practice: false, ready: false };
+
+function cs2Pid() {
+  try {
+    const out = execFileSync('tasklist', ['/FI', 'IMAGENAME eq cs2.exe', '/FO', 'CSV', '/NH'], { encoding: 'utf8' });
+    const m = out.match(/"cs2\.exe","(\d+)"/i);
+    return m ? +m[1] : null;
+  } catch { return null; }
+}
+
+function refreshCs2() {
+  const pid = cs2Pid();
+  if (pid !== cs2.pid) {
+    cs2.pid = pid;
+    cs2.ready = false;
+    cs2.practice = !!pid && cs2CommandLine().includes('-condebug');
+  }
+}
+const cs2Status = () => (!cs2.pid ? 'off' : !cs2.practice ? 'game' : cs2.ready ? 'ready' : 'practice');
+
+async function launchCs2(map) {
+  const from = logSize();
+  const steam = path.join(steamPath(), 'steam.exe');
+  spawn(steam, ['-applaunch', '730', '-condebug', '-novid', '+map', map], { detached: true, stdio: 'ignore' }).unref();
+  if (!await waitFor(/Host activate: Loading/, 180e3, from)) throw new Error('Gra nie załadowała mapy w 3 minuty');
+  state.map = map;
+  await sleep(8000); // let the player spawn before the cheats/bot commands
+  refreshCs2();
+}
+
+// Types `exec granko` until the log confirms it (the console key can land while a menu is open).
+async function setupPractice() {
+  for (let i = 0; i < 3; i++) {
+    const from = logSize();
+    typeExec('granko');
+    if (await waitFor(/execing granko\r?\n/, 5000, from)) { cs2.ready = true; return; }
+  }
+  throw new Error('Nie udało się wpisać exec granko (otwarte menu w grze?)');
+}
+
+// CS2 in practice mode on `map` with the recorder's cfg loaded; a normal game is never touched.
+async function ensurePractice(map) {
+  refreshCs2();
+  if (cs2.pid && !cs2.practice) throw new Error('CS2 jest włączony normalnie (gra). Zamknij go, żeby włączyć trening.');
+  if (!cs2.pid) {
+    console.log(`  → uruchamiam CS2 offline na ${map}`);
+    await launchCs2(map);
+  }
+  if (!cs2.ready) await setupPractice();
+  if (map && state.map !== map) await changeMap(map);
+}
+
+const JOBS = {
+  async teleport(p) {
+    await ensurePractice(p.map);
+    return teleportJob(p);
+  },
+  async start(p) {
+    await ensurePractice(p.map || state.map);
+    return { status: cs2Status(), map: state.map };
+  },
+  async quit() {
+    refreshCs2();
+    if (!cs2.pid) return { status: 'off' };
+    if (!cs2.practice) throw new Error('CS2 jest w normalnej grze, nie zamykam go.');
+    await runJob(['cl_draw_only_deathnotices 0', 'r_drawviewmodel 1'], 3000).catch(() => {});
+    fs.writeFileSync(path.join(CFG, 'grankojob.cfg'), 'quit\n');
+    execFileSync('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(HERE, 'keys.ps1'), '-Vk', '0x78']);
+    for (let i = 0; i < 20 && cs2Pid(); i++) await sleep(500);
+    refreshCs2();
+    return { status: cs2Status() };
+  },
+};
+
+// Heartbeat + job queue. Polls fast while CS2 runs, slower when the PC just sits there.
+const agentInfo = () => ({ cs2: cs2Status(), side: state.side, mode: AGENT ? 'agent' : 'manual', version: 2 });
+
+function agentLoop() {
+  let lastCheck = 0;
+  // Separate heartbeat, so the page still sees the PC while a long job (cold CS2 start) runs.
+  setInterval(() => { rpc('agent_ping', { p_map: state.map, p_info: agentInfo() }).catch(() => {}); }, 3000);
+  const tick = async () => {
     try {
-      const job = await rpc('agent_take', { p_map: state.map, p_info: { side: state.side, version: 1 } });
+      if (Date.now() - lastCheck > 4000) { refreshCs2(); lastCheck = Date.now(); }
+      const job = await rpc('agent_take', {
+        p_map: state.map,
+        p_info: agentInfo(),
+      });
       if (job) {
         console.log(`  ⇢ zadanie ze strony #${job.id}: ${job.kind}`);
         try {
-          const result = await teleportJob(job.payload);
+          const run = JOBS[job.kind];
+          if (!run) throw new Error(`Nieznane zadanie ${job.kind}`);
+          const result = await run(job.payload || {});
           await rpc('agent_finish', { job_id: job.id, ok: true, p_result: result });
-          beep('ok');
-          console.log(`  ✓ #${job.id} gotowe (${result.setpos})`);
+          if (job.kind === 'teleport') beep('ok');
+          console.log(`  ✓ #${job.id} gotowe`);
         } catch (err) {
-          await rpc('agent_finish', { job_id: job.id, ok: false, p_result: { error: err.message } });
+          await rpc('agent_finish', { job_id: job.id, ok: false, p_result: { error: err.message } }).catch(() => {});
           beep('err');
           console.log(`  ✗ #${job.id}: ${err.message}`);
         }
+        lastCheck = 0;
       }
     } catch (err) {
       console.log(`  (brak połączenia z Granko: ${err.message})`);
-    } finally {
-      busy = false;
     }
-  }, 900);
+    setTimeout(tick, cs2.pid ? 900 : 2500);
+  };
+  tick();
 }
 
 // --- console.log follower ---
@@ -330,6 +420,8 @@ function follow() {
         state.side = m[1] === 'CT' ? 'CT' : 'T';
       } else if ((m = line.match(/execing (grankopos|grankoshot|grankoland|grankojob)\b/))) {
         pending = m[1];
+      } else if (/execing granko\b/.test(line)) {
+        cs2.ready = true;
       } else if ((m = line.match(/setpos\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+);\s*setang\s+(-?[\d.]+)\s+(-?[\d.]+)/))) {
         const p = { x: +(+m[1]).toFixed(2), y: +(+m[2]).toFixed(2), z: +(+m[3]).toFixed(2), pitch: +(+m[4]).toFixed(2), yaw: +(+m[5]).toFixed(2) };
         addSample(p);
@@ -351,6 +443,7 @@ async function waitFor(re, timeoutMs, start = logSize()) {
     await sleep(1000);
     if (!fs.existsSync(LOG)) continue;
     const size = fs.statSync(LOG).size;
+    if (size < start) start = 0; // a fresh CS2 start recreates console.log
     if (size <= start) continue;
     const fd = fs.openSync(LOG, 'r');
     const buf = Buffer.alloc(size - start);
@@ -361,8 +454,48 @@ async function waitFor(re, timeoutMs, start = logSize()) {
   return false;
 }
 
+// When the agent (re)starts next to a running CS2, the current map and whether `exec granko` already
+// ran this session are in the tail of console.log.
+function primeFromLog() {
+  if (!cs2.pid || !fs.existsSync(LOG)) return;
+  const size = fs.statSync(LOG).size;
+  const from = Math.max(0, size - 400e3);
+  const fd = fs.openSync(LOG, 'r');
+  const buf = Buffer.alloc(size - from);
+  fs.readSync(fd, buf, 0, buf.length, from);
+  fs.closeSync(fd);
+  const text = buf.toString('utf8');
+  const loads = [...text.matchAll(/Host activate: Loading \((\w+)\)/g)];
+  const last = loads.at(-1);
+  if (!last) return;
+  state.map = last[1];
+  if (cs2.practice && /execing granko\r?\n/.test(text.slice(last.index))) cs2.ready = true;
+}
+
+// --- single instance ---
+
+const PIDFILE = path.join(HERE, 'agent.pid');
+function otherInstance() {
+  try {
+    const pid = +fs.readFileSync(PIDFILE, 'utf8');
+    if (pid && pid !== process.pid) { process.kill(pid, 0); return pid; }
+  } catch { /* no file or the process is gone */ }
+  return null;
+}
+
+const HELP = `
+Gotowe. W grze:
+  F6  stań w miejscu rzutu i wyceluj: zapis pozycji, celownika i screena
+  F7  po rzucie: screen efektu
+  F8  stań tam, gdzie granat wylądował: punkt na radarze
+  F5  powrót na ostatnią pozycję z F6
+Zakładka „Podgląd” w Granko steruje tym PC: start CS2, teleport ze screenem, zamknięcie gry.
+Każdy zapis potwierdza krótki dźwięk. Wszystko ląduje w Granko (Line-upy), uzupełnij tam nazwę i rodzaj granatu.
+Na koniec w konsoli: exec grankooff (przywraca HUD i broń). Ctrl+C zamyka recorder.
+`;
+
 async function main() {
-  console.log(`Granko Recorder · CS2: ${GAME}`);
+  console.log(`Granko ${AGENT ? 'Agent' : 'Recorder'} · ${new Date().toLocaleString('pl-PL')} · CS2: ${GAME}`);
   try {
     const pb = await rpc('playbook', {});
     const me = pb.members.find(m => m.name.toLowerCase() === String(config.member || '').toLowerCase());
@@ -370,46 +503,38 @@ async function main() {
     console.log(`Hasło OK${me ? `, nagrywasz jako ${me.name}` : ''}.`);
   } catch (err) {
     console.error(`Nie mogę się połączyć z Granko: ${err.message}`);
+    if (AGENT) { setTimeout(main, 60e3); return; } // no network yet right after login: try again
     process.exit(1);
   }
   writeCfgs();
 
-  const cmd = cs2CommandLine();
-  if (cmd && !cmd.includes('-condebug')) {
-    console.error('CS2 jest włączony bez -condebug, więc nie widzę konsoli. Zamknij grę i uruchom recorder jeszcze raz.');
-    process.exit(1);
+  const other = otherInstance();
+  if (other) {
+    if (AGENT) process.exit(0);
+    await rpc('agent_submit', { p_kind: 'start', p_payload: { map: startMap }, p_by: state.memberId });
+    console.log(`Agent Granko już działa w tle (PID ${other}), poprosiłem go o uruchomienie CS2 na ${OVERVIEWS[startMap].name}.`);
+    console.log(HELP);
+    process.exit(0);
   }
-  if (!cmd) {
-    console.log(`Uruchamiam CS2 offline na ${OVERVIEWS[startMap].name}…`);
-    const steam = path.join(steamPath(), 'steam.exe');
-    spawn(steam, ['-applaunch', '730', '-condebug', '-novid', '+map', startMap], { detached: true, stdio: 'ignore' }).unref();
-    if (!await waitFor(/Host activate: Loading/, 180e3)) {
-      console.error('Gra nie załadowała mapy w 3 minuty.');
-      process.exit(1);
-    }
-    await sleep(8000); // let the player spawn before the cheats/bot commands
-  }
+  fs.writeFileSync(PIDFILE, String(process.pid));
+  const cleanup = () => { try { if (+fs.readFileSync(PIDFILE, 'utf8') === process.pid) fs.unlinkSync(PIDFILE); } catch { /* gone */ } };
+  process.on('exit', cleanup);
+  process.on('SIGINT', () => process.exit(0));
+
   follow();
+  refreshCs2();
+  primeFromLog();
   agentLoop();
-  // The console key can land while a menu is open; check the log and try again.
-  let ok = false;
-  for (let i = 0; i < 3 && !ok; i++) {
-    console.log(i ? '  …nie zadziałało, ponawiam' : 'Wpisuję w konsoli: exec granko');
-    const from = logSize();
-    typeExec('granko');
-    ok = await waitFor(/execing granko\r?\n/, 5000, from);
+  if (AGENT) {
+    console.log('Agent czeka na polecenia ze strony (zakładka Podgląd).');
+    return;
   }
-  if (!ok) console.log('Nie udało się wpisać komendy. Otwórz konsolę (~) i wpisz sam: exec granko');
-  console.log(`
-Gotowe. W grze:
-  F6  stań w miejscu rzutu i wyceluj: zapis pozycji, celownika i screena
-  F7  po rzucie: screen efektu
-  F8  stań tam, gdzie granat wylądował: punkt na radarze
-  F5  powrót na ostatnią pozycję z F6
-Zakładka „Podgląd” w Granko też działa: klik na radarze teleportuje cię tutaj i wysyła screena (F9 wciska recorder).
-Każdy zapis potwierdza krótki dźwięk. Wszystko ląduje w Granko (Line-upy), uzupełnij tam nazwę i rodzaj granatu.
-Na koniec w konsoli: exec grankooff (przywraca HUD i broń). Ctrl+C zamyka recorder.
-`);
+  try {
+    await ensurePractice(startMap);
+    console.log(HELP);
+  } catch (err) {
+    console.error(err.message);
+  }
 }
 
 main();

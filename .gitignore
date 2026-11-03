@@ -10,3 +10,7 @@ recorder/config.json
 
 # Height samples the recorder learns per map.
 recorder/zcache.json
+
+# Agent runtime files.
+recorder/agent.log
+recorder/agent.pid

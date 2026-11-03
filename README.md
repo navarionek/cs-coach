@@ -46,3 +46,15 @@ CS2 nie ma zdalnej konsoli, więc klawisze odpalają małe cfg (`grankopos` itd.
 Gdy Recorder działa, zakładka **Podgląd** w Granko (z dowolnego urządzenia, także z telefonu) może nim sterować: klikasz na radarze „Stań tu” i opcjonalnie „Patrz tam”, wciskasz **Pokaż w grze**, a PC z CS2 teleportuje postać i odsyła screena (z teleportem do skopiowania i opcją „Zapisz jako line-up”).
 
 Pod spodem: strona dodaje zadanie do `cs.agent_jobs` (`cs.agent_submit`), Recorder co ~1 s woła `cs.agent_take` (to też jego heartbeat w `cs.agent`), wpisuje komendy do `grankojob.cfg`, sam wciska **F9** i odsyła wynik przez `cs.agent_finish`. Radar nie zna wysokości, więc postać spada z niewielkiej wysokości nad najbliższym znanym punktem; każda pozycja z gry trafia do `recorder/zcache.json`, więc z czasem trafia coraz lepiej. Jeśli zadanie jest na inną mapę, Recorder sam ją zmienia.
+
+### Agent w tle (status PC i start ze strony)
+
+`recorder/Granko Agent.vbs` uruchamia ten sam program w trybie `--agent`, ukryty, z logiem w `recorder/agent.log`. Agent co 3 s zgłasza się do Granko (`cs.agent_ping`) ze stanem: PC online i CS2 wyłączony / w normalnej grze / trening / Recorder gotowy. Zakładka **Podgląd** pokazuje ten stan i ma przyciski **Uruchom CS2 + Recorder** (na wybranej mapie) i **Zamknij CS2**; teleport sam odpala grę, jeśli jest wyłączona. Normalnej gry (CS2 bez `-condebug`) agent nigdy nie rusza.
+
+Autostart z Windowsem (skrót w folderze Autostart):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File E:\Projects\CsCoach\recorder\install-autostart.ps1
+```
+
+Usunięcie: ten sam skrypt z `-Remove`. Druga kopia programu (np. `Granko Recorder.cmd`, gdy agent już działa) nie startuje równolegle, tylko prosi agenta o uruchomienie CS2.
