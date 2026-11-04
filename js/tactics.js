@@ -5,7 +5,8 @@ import {
   lineup, member, memberTag, memberColor, tactic,
 } from './core.js';
 import { pickLineups, openLineup } from './lineups.js';
-import { hasRadar, planStatic, mountPlan, mountRouteEditor } from './radar.js';
+import { hasRadar, planStatic, mountPlan, mountRouteEditor, routeLine } from './radar.js';
+import { calloutOptions, calloutPoint, placeAt } from './callouts.js';
 import { TAGS, tacticSite } from './brain.js';
 
 const ui = { map: store.get('cs.map') || MAPS[0].id, side: store.get('cs.side') || 'T', archived: false };
@@ -53,13 +54,16 @@ function tacticCard(x) {
 }
 
 // Role card used both in the tactic view and in live mode.
-// `plan` ({map, roles}) draws the team routes with this role highlighted (live mode).
-export function roleBlock(role, { mine = false, big = false, plan = null } = {}) {
+// `plan` ({map, roles}) draws the team routes with this role highlighted (live mode); `map` lets
+// the route read as callouts.
+export function roleBlock(role, { mine = false, big = false, plan = null, map = plan?.map } = {}) {
   const m = member(role.member_id);
   const lus = (role.lineups || []).map(lineup).filter(Boolean);
+  const route = map ? routeLine(map, role.path) : '';
   return `<div class="role ${mine ? 'mine' : ''} ${big ? 'big' : ''}" style="--c:${esc(memberColor(m))}">
     <div class="role-head"><span class="role-name">${esc(role.name || 'Rola')}</span>${memberTag(m)}</div>
     ${role.position ? `<div class="role-pos">📍 ${esc(role.position)}</div>` : ''}
+    ${route ? `<div class="role-route">${route}</div>` : ''}
     ${role.task ? `<div class="role-task">${esc(role.task)}</div>` : ''}
     ${big && plan ? planStatic(plan.map, plan.roles, { highlight: plan.roles.indexOf(role), lineups: lus }) : ''}
     ${lus.length ? `<div class="role-lus">${lus.map(l => {
@@ -91,7 +95,7 @@ export function openTactic(id) {
       ${x.summary ? `<p class="lead">${esc(x.summary)}</p>` : ''}
       ${x.notes ? `<p class="notes">${esc(x.notes)}</p>` : ''}
       <div class="tac-plan"></div>
-      <div class="roles-grid">${x.roles.map(r => roleBlock(r, { mine: r.member_id === team.me })).join('')}</div>
+      <div class="roles-grid">${x.roles.map(r => roleBlock(r, { mine: r.member_id === team.me, map: x.map })).join('')}</div>
       <div class="actions">
         <button type="button" class="btn ghost" data-act="archive">${x.archived ? 'Przywróć' : 'Archiwizuj'}</button>
         <button type="button" class="btn" data-act="dup">Duplikuj</button>
@@ -174,19 +178,23 @@ export function editTactic(existing) {
   }
 
   function drawRoles() {
-    rolesEl.innerHTML = x.roles.map((r, i) => {
+    const calls = calloutOptions(form.map.value);
+    rolesEl.innerHTML = `<datalist id="callout-names">${calls.map(c => `<option value="${esc(c.name)}">`).join('')}</datalist>` + x.roles.map((r, i) => {
       const lus = (r.lineups || []).map(lineup).filter(Boolean);
       return `<div class="role-edit" style="--c:${esc(memberColor(member(r.member_id)))}">
         <div class="row2">
           <label>Rola ${i + 1}<input name="rname" list="role-names" value="${esc(r.name || '')}" placeholder="np. Entry" maxlength="30"></label>
           <label>Gracz<select name="rmember"><option value="">— ktokolwiek —</option>${ms.map(m => `<option value="${esc(m.id)}" ${m.id === r.member_id ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}</select></label>
         </div>
-        <label>Pozycja<input name="rpos" value="${esc(r.position || '')}" placeholder="np. banana, za skrzynią" maxlength="80"></label>
+        <label>Pozycja<input name="rpos" list="callout-names" value="${esc(r.position || '')}" placeholder="np. banana, za skrzynią" maxlength="80"></label>
         <label>Zadanie<textarea name="rtask" rows="3" placeholder="np. 1:40 flash nad car, wchodzisz pierwszy na site, czyścisz plat">${esc(r.task || '')}</textarea></label>
         <div class="route-row">
           ${r.path?.length ? planStatic(form.map.value, [r], { cls: 'mini' }) : ''}
           <button type="button" class="btn small" data-route="${i}" ${hasRadar(form.map.value) ? '' : 'disabled'}>🗺 ${r.path?.length ? `Trasa (${r.path.length} pkt)` : 'Wyznacz trasę'}</button>
+          ${calls.length ? `<select class="goto" data-goal="${i}" aria-label="Idź na callout"><option value="">🎯 Idź na callout…</option>
+            ${calls.map(c => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('')}</select>` : ''}
         </div>
+        ${r.path?.length ? `<div class="role-route">${routeLine(form.map.value, r.path)}</div>` : ''}
         <div class="role-lus edit">
           ${lus.map(l => `<span class="lu-chip">${nadeBadge(l.nade)} ${esc(l.title)}<button type="button" data-rm-lu="${esc(l.id)}" data-role="${i}">✕</button></span>`).join('')}
           <button type="button" class="btn small" data-add-lu="${i}">+ granaty</button>
@@ -205,9 +213,30 @@ export function editTactic(existing) {
     rolesEl.querySelectorAll('[data-route]').forEach(b => b.onclick = async () => {
       syncRoles();
       const path = await editRoute(form.map.value, x.roles, +b.dataset.route);
-      if (path) x.roles[+b.dataset.route].path = path;
+      const r = x.roles[+b.dataset.route];
+      if (path) r.path = path;
+      if (path?.length && !r.position) r.position = placeAt(form.map.value, path.at(-1))?.name || '';
       drawRoles();
     });
+    // "Go to a callout": a new destination at the callout's centre. A role without a route starts
+    // from its side's spawn; an empty position takes the callout's name.
+    rolesEl.querySelectorAll('[data-goal]').forEach(sel => sel.addEventListener('change', () => {
+      if (!sel.value) return;
+      syncRoles();
+      const map = form.map.value;
+      const r = x.roles[+sel.dataset.goal];
+      const to = calloutPoint(map, sel.value, r.path?.at(-1)?.level);
+      const path = (r.path || []).map(p => ({ ...p }));
+      if (!path.length) {
+        const spawn = calloutPoint(map, form.side.value === 'CT' ? 'CTSpawn' : 'TSpawn');
+        if (spawn && sel.value !== (form.side.value === 'CT' ? 'CTSpawn' : 'TSpawn')) path.push(spawn);
+      }
+      if (path.length > 1 && placeAt(map, path.at(-1))?.id === sel.value) path.pop();
+      path.push(to);
+      r.path = path;
+      if (!r.position) r.position = calloutOptions(map).find(c => c.id === sel.value)?.name || '';
+      drawRoles();
+    }));
     rolesEl.querySelectorAll('[data-add-lu]').forEach(b => b.onclick = async () => {
       syncRoles();
       const r = x.roles[+b.dataset.addLu];

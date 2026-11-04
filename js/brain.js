@@ -6,6 +6,7 @@
 // match is going and how predictable we've been. Deterministic, so all five pages agree.
 import { team, KINDS, lineup } from './core.js';
 import { SITES } from './mapdata.js';
+import { placeAt } from './callouts.js';
 
 export const TAGS = {
   T: { rush: 'Rush', execute: 'Wejście z utility', split: 'Split', default: 'Default', fake: 'Fake', slow: 'Wolna', contact: 'Contact', 'anti-eco': 'Na eco rywala' },
@@ -116,7 +117,8 @@ export function economy(ctx, history) {
 
 // --- tactic features ---
 
-// Target site from the tactic, else from where its routes and grenades end up.
+// Target site from the tactic, else from where its routes and grenades end up: the bombsite
+// callout most of them land in, else the site nearest to their middle.
 export function tacticSite(t) {
   if (t.site) return t.site;
   const sites = SITES[t.map];
@@ -126,6 +128,9 @@ export function tacticSite(t) {
     ...t.roles.flatMap(r => (r.lineups || []).map(lineup).filter(Boolean).map(l => l.spot?.to).filter(Boolean)),
   ];
   if (!pts.length) return null;
+  const inSite = { A: 0, B: 0 };
+  for (const p of pts) { const id = placeAt(t.map, p)?.id; if (id === 'BombsiteA') inSite.A++; if (id === 'BombsiteB') inSite.B++; }
+  if (inSite.A !== inSite.B && Math.max(inSite.A, inSite.B) * 2 >= pts.length) return inSite.A > inSite.B ? 'A' : 'B';
   const c = { x: pts.reduce((s, p) => s + p.x, 0) / pts.length, y: pts.reduce((s, p) => s + p.y, 0) / pts.length };
   const dist = s => Math.hypot(s.x - c.x, s.y - c.y);
   const [best] = Object.entries(sites).sort((a, b) => dist(a[1]) - dist(b[1]));

@@ -1,8 +1,10 @@
 // Radar (overhead map) views: lineup spots (where it's thrown from, where it lands), tactic routes
 // (where each role walks) and zoom/pan for all of them. Points are 0..1 fractions of the square
 // radar image; Nuke's two floors share one coordinate frame, so a route can go up or down stairs.
-import { team, esc, imageUrl, NADES, segmented, bindSegmented, member } from './core.js';
+// Under everything sit the game's callout zones with their names (🏷 toggles them).
+import { team, store, esc, imageUrl, NADES, segmented, bindSegmented, member } from './core.js';
 import { SPAWNS } from './mapdata.js';
+import { calloutsFor, placeAt, calloutPoint, calloutOptions } from './callouts.js';
 
 const LEVEL_NAMES = { main: 'Góra', lower: 'Dół' };
 export const NADE_COLORS = { smoke: '#d5deec', flash: '#fff3a3', molotov: '#ff9a5c', he: '#ff7a8c', decoy: '#b5bfcf' };
@@ -35,14 +37,48 @@ function spawnMarks(map, level) {
     .map(p => `<span class="r-spawn ${side.toLowerCase()}" style="left:${n2(p.x * 100)}%;top:${n2(p.y * 100)}%" title="Spawn ${side}"></span>`)).join('');
 }
 
+// Callout zones (an SVG of their own, under the routes) and their names. Small places only get a
+// name once you zoom in, so Nuke's stacked rooms don't pile up on the whole-map view.
+const MINOR = 0.001;
+document.documentElement.classList.toggle('no-callouts', store.get('cs.callouts') === 'off');
+function calloutLayer(map, level) {
+  const cs = calloutsFor(map);
+  if (!cs.length) return { svg: '', marks: '' };
+  const svg = cs.flatMap(c => c.zones.filter(z => z.level === level).map(z =>
+    `<polygon class="r-zone" data-c="${esc(c.id)}" points="${z.poly.map(([x, y]) => `${n2(x * 100)},${n2(y * 100)}`).join(' ')}" />`)).join('');
+  const marks = cs.flatMap(c => c.labels.filter(l => l.level === level).map(l =>
+    `<span class="r-call ${l.a < MINOR ? 'minor' : ''}" data-c="${esc(c.id)}" style="left:${n2(l.x * 100)}%;top:${n2(l.y * 100)}%">${esc(c.name)}</span>`)).join('');
+  return { svg, marks };
+}
+
 // One radar box. Everything that zooms lives in .r-stage; the zoom buttons sit outside it.
 function radarBox(map, level, { svg = '', marks = '', cls = '', zoom = false } = {}) {
+  const C = calloutLayer(map, level);
   return `<div class="radar ${cls}">
     <div class="r-stage">${radarImg(map, level)}
-      <svg class="r-svg" viewBox="0 0 100 100" preserveAspectRatio="none">${svg}</svg>${spawnMarks(map, level)}${marks}</div>
+      <svg class="r-svg r-zones" viewBox="0 0 100 100" preserveAspectRatio="none">${C.svg}</svg>
+      <svg class="r-svg" viewBox="0 0 100 100" preserveAspectRatio="none">${svg}</svg>${C.marks}${spawnMarks(map, level)}${marks}</div>
     ${zoom ? `<div class="r-zoom"><button type="button" data-z="in" aria-label="Przybliż">+</button>
-      <button type="button" data-z="out" aria-label="Oddal">−</button><button type="button" data-z="reset" aria-label="Cała mapa">⟲</button></div>` : ''}
+      <button type="button" data-z="out" aria-label="Oddal">−</button><button type="button" data-z="reset" aria-label="Cała mapa">⟲</button>
+      ${C.svg ? '<button type="button" data-z="callouts" aria-label="Callouty" title="Pokaż / ukryj callouty">🏷</button>' : ''}</div>` : ''}
   </div>`;
+}
+
+// Editors: the callout under the pointer lights up and its name shows in `out`.
+function hoverCallouts(box, map, level, out) {
+  let cur = null;
+  const set = id => {
+    if (id === cur) return;
+    cur = id;
+    box.querySelectorAll('.r-zone.hot, .r-call.hot').forEach(n => n.classList.remove('hot'));
+    if (id) box.querySelectorAll(`[data-c="${CSS.escape(id)}"]`).forEach(n => n.classList.add('hot'));
+  };
+  box.addEventListener('pointermove', e => {
+    const c = placeAt(map, pointFrom(box, e, level));
+    set(c?.id || null);
+    if (out) out.textContent = c ? `📍 ${c.name}` : '';
+  });
+  box.addEventListener('pointerleave', () => { set(null); if (out) out.textContent = ''; });
 }
 
 // Zoom & pan on a radar box: wheel, pinch, drag, +/−/⟲. `state` ({z, x, y}) is owned by the
@@ -126,6 +162,10 @@ function enableZoom(box, state, { ignore = null } = {}) {
     if (b.dataset.z === 'in') zoomAt(state.z * 1.5, c.x, c.y);
     if (b.dataset.z === 'out') zoomAt(state.z / 1.5, c.x, c.y);
     if (b.dataset.z === 'reset') { state.z = 1; state.x = 0; state.y = 0; apply(); }
+    if (b.dataset.z === 'callouts') {
+      const hidden = document.documentElement.classList.toggle('no-callouts');
+      store.set('cs.callouts', hidden ? 'off' : null);
+    }
   }));
   apply();
 }
@@ -235,6 +275,13 @@ function planBox(map, roles, lineups, level, { highlight = null, cls = '', zoom 
   return radarBox(map, level, { svg: R.svg + L.svg, marks: R.marks + L.marks, cls: `plan ${cls}`, zoom });
 }
 
+// "🧭 T spawn → Banana → B site" for a role's path.
+export function routeLine(map, path) {
+  const names = [];
+  for (const p of path || []) { const c = placeAt(map, p); if (c && names.at(-1) !== c.name) names.push(c.name); }
+  return names.length ? `<span class="r-chain">🧭 ${names.map(esc).join(' → ')}</span>` : '';
+}
+
 // --- public views ---
 
 // Static radar with throw lines; markers carry data-open-lineup for the caller to bind.
@@ -312,12 +359,13 @@ export function mountSpotEditor(el, { map, spot, nade, side, onChange, labels = 
         ${cur.from || cur.to ? '<button type="button" class="btn small ghost" data-act="clear">Wyczyść</button>' : ''}
       </div>
       ${radarBox(map, level, { svg: L.svg, marks: L.marks, cls: 'pick', zoom: true })}
-      <p class="muted small">${mode === 'from' ? (labels.hintFrom || 'Kliknij miejsce, w którym stoisz przy rzucie.') : (labels.hintTo || 'Kliknij, gdzie granat ma wylądować.')} Kółko myszy lub dwa palce przybliżają, przeciąganie przesuwa mapę.</p>`;
+      <p class="muted small"><b class="r-here"></b> ${mode === 'from' ? (labels.hintFrom || 'Kliknij miejsce, w którym stoisz przy rzucie.') : (labels.hintTo || 'Kliknij, gdzie granat ma wylądować.')} Kółko myszy lub dwa palce przybliżają, przeciąganie przesuwa mapę.</p>`;
     bindSegmented(el, 'smode', v => { mode = v; draw(); });
     bindSegmented(el, 'slevel', v => { level = v; draw(); });
     el.querySelector('[data-act="clear"]')?.addEventListener('click', () => { cur = {}; mode = 'from'; onChange(null); draw(); });
     const box = el.querySelector('.radar');
     enableZoom(box, zoom);
+    hoverCallouts(box, map, level, el.querySelector('.r-here'));
     box.addEventListener('click', e => {
       if (e.target.closest('.r-zoom')) return;
       cur[mode] = pointFrom(box, e, level);
@@ -358,19 +406,32 @@ export function mountRouteEditor(el, { map, roles, index, lineups = [], onChange
         ${levelSwitch(map, level, 'elevel')}
         <button type="button" class="btn small" data-act="undo" ${path.length ? '' : 'disabled'}>↶ Cofnij</button>
         <button type="button" class="btn small ghost" data-act="clear" ${path.length ? '' : 'disabled'}>Wyczyść</button>
+        ${calloutsFor(map).length ? `<select class="goto" data-act="goto" aria-label="Idź na callout">
+          <option value="">${path.length ? '+ idź na callout…' : '+ start z calloutu…'}</option>
+          ${calloutOptions(map).map(c => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('')}</select>` : ''}
         <span class="muted small">${path.length ? `${path.length} pkt` : ''}</span>
       </div>
       ${planBox(map, view, lineups, level, { highlight: index, cls: 'pick route-pick', zoom: true })}
       <p class="muted small">${path.length
         ? 'Klikaj kolejne punkty trasy, ostatni to cel. Przeciągnij punkt, żeby go przesunąć, kliknij go dwa razy, żeby usunąć.'
-        : 'Kliknij miejsce, z którego gracz startuje.'} Kółko myszy lub dwa palce przybliżają, przeciąganie mapy ją przesuwa.</p>`;
+        : 'Kliknij miejsce, z którego gracz startuje.'} Kółko myszy lub dwa palce przybliżają, przeciąganie mapy ją przesuwa.</p>
+      <p class="small r-route">${routeLine(map, path) || '<span class="muted">Trasa po calloutach pojawi się tutaj.</span>'} <b class="r-here"></b></p>`;
     bindSegmented(el, 'elevel', v => { level = v; draw(); });
+    el.querySelector('[data-act="goto"]')?.addEventListener('change', e => {
+      const p = calloutPoint(map, e.target.value, level);
+      if (!p) return;
+      path.push(p);
+      level = p.level;
+      changed();
+      draw();
+    });
     el.querySelector('[data-act="undo"]').onclick = () => { path.pop(); changed(); draw(); };
     el.querySelector('[data-act="clear"]').onclick = () => { path.length = 0; changed(); draw(); };
 
     const box = el.querySelector('.radar');
     box.querySelectorAll(own).forEach(p => p.classList.add('editable'));
     enableZoom(box, zoom, { ignore: own });
+    hoverCallouts(box, map, level, el.querySelector('.r-here'));
 
     // Dragging one of this role's points (the zoom handler leaves those alone).
     let drag = null;

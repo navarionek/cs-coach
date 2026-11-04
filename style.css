@@ -435,6 +435,27 @@ label { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color:
 }
 .r-zoom button:hover { background: rgba(30, 36, 50, .95); }
 
+/* Callout zones from the game, faint so routes and lineups stay on top; names keep their size. */
+.r-zone { fill: rgba(255, 255, 255, .035); stroke: rgba(200, 215, 240, .28); stroke-width: calc(.22px / var(--z)); stroke-linejoin: round; transition: fill .12s, stroke .12s; }
+.r-zone.hot { fill: rgba(90, 180, 255, .16); stroke: rgba(90, 180, 255, .85); }
+.r-call {
+  position: absolute; transform: translate(-50%, -50%) scale(calc(1 / var(--z))); white-space: nowrap; pointer-events: none;
+  font: 600 10px Inter, sans-serif; letter-spacing: .02em; color: rgba(235, 241, 250, .78);
+  text-shadow: 0 0 3px #000, 0 0 2px #000, 0 1px 1px #000;
+}
+.r-call.hot { color: #fff; }
+.r-call.minor { display: none; }
+.radar.zoomed .r-call.minor { display: block; }
+.radar.big .r-call, .plan-wrap .r-call, .radar.pick .r-call { font-size: 11px; }
+.radar.mini .r-call, .route-row .r-call, .radar.detail .r-call, .radar.role-radar .r-call { display: none; }
+.no-callouts .r-zones, .no-callouts .r-call { display: none !important; }
+.no-callouts .r-zoom [data-z="callouts"] { opacity: .45; }
+.r-here { color: var(--text); font-weight: 600; }
+.r-route { margin: 0; min-height: 1.4em; }
+.r-chain { color: var(--text); font-weight: 600; }
+.spot-bar select.goto { width: auto; padding: 5px 8px; font-size: 13px; }
+.role-route { font-size: 13px; color: var(--muted); margin-top: 2px; }
+
 /* Markers keep their on-screen size while the map zooms. */
 .r-from, .r-to, .rt-pt { position: absolute; transform: translate(-50%, -50%) scale(calc(1 / var(--z))); }
 .r-from { width: 10px; height: 10px; border-radius: 50%; background: var(--c); box-shadow: 0 0 0 2px rgba(0, 0, 0, .6); }

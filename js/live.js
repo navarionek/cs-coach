@@ -282,7 +282,7 @@ function draw(force = false) {
           : x ? '<p class="muted">Nie masz przypisanej roli w tej taktyce. Zobacz role poniżej i weź wolną.</p>'
           : '<p class="muted">Pojawi się, jak będzie wybrana taktyka.</p>'}
       </section>
-      ${x && (others.length || hasPlan(x.roles)) ? `<section class="card roles-live"><div class="call-label">PLAN DRUŻYNY</div><div class="plan-slot"></div><div class="roles-grid">${others.map(r => roleBlock(r)).join('')}</div></section>` : ''}
+      ${x && (others.length || hasPlan(x.roles)) ? `<section class="card roles-live"><div class="call-label">PLAN DRUŻYNY</div><div class="plan-slot"></div><div class="roles-grid">${others.map(r => roleBlock(r, { map: x.map })).join('')}</div></section>` : ''}
       ${model ? analysisCard(model) : ''}
       ${sugg.length ? `<section class="card sugg">
         <div class="call-label">PROPOZYCJE</div>
