@@ -5,7 +5,7 @@ import {
   lineup, member, memberTag, memberColor, tactic,
 } from './core.js';
 import { pickLineups, openLineup } from './lineups.js';
-import { hasRadar, planStatic, mountPlan, mountRouteEditor, routeLine } from './radar.js';
+import { hasRadar, planStatic, mountPlan, mountRouteEditor, routeLine, trackFor } from './radar.js';
 import { calloutOptions, calloutPoint, placeAt } from './callouts.js';
 import { TAGS, tacticSite } from './brain.js';
 
@@ -59,7 +59,7 @@ function tacticCard(x) {
 export function roleBlock(role, { mine = false, big = false, plan = null, map = plan?.map } = {}) {
   const m = member(role.member_id);
   const lus = (role.lineups || []).map(lineup).filter(Boolean);
-  const route = map ? routeLine(map, role.path) : '';
+  const route = map ? routeLine(map, role.path, role.track) : '';
   return `<div class="role ${mine ? 'mine' : ''} ${big ? 'big' : ''}" style="--c:${esc(memberColor(m))}">
     <div class="role-head"><span class="role-name">${esc(role.name || 'Rola')}</span>${memberTag(m)}</div>
     ${role.position ? `<div class="role-pos">📍 ${esc(role.position)}</div>` : ''}
@@ -194,7 +194,7 @@ export function editTactic(existing) {
           ${calls.length ? `<select class="goto" data-goal="${i}" aria-label="Idź na callout"><option value="">🎯 Idź na callout…</option>
             ${calls.map(c => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('')}</select>` : ''}
         </div>
-        ${r.path?.length ? `<div class="role-route">${routeLine(form.map.value, r.path)}</div>` : ''}
+        ${r.path?.length ? `<div class="role-route">${routeLine(form.map.value, r.path, r.track)}</div>` : ''}
         <div class="role-lus edit">
           ${lus.map(l => `<span class="lu-chip">${nadeBadge(l.nade)} ${esc(l.title)}<button type="button" data-rm-lu="${esc(l.id)}" data-role="${i}">✕</button></span>`).join('')}
           <button type="button" class="btn small" data-add-lu="${i}">+ granaty</button>
@@ -214,13 +214,13 @@ export function editTactic(existing) {
       syncRoles();
       const path = await editRoute(form.map.value, x.roles, +b.dataset.route);
       const r = x.roles[+b.dataset.route];
-      if (path) r.path = path;
-      if (path?.length && !r.position) r.position = placeAt(form.map.value, path.at(-1))?.name || '';
+      if (path) { r.path = path.path; r.track = path.track; }
+      if (path?.path.length && !r.position) r.position = placeAt(form.map.value, path.path.at(-1))?.name || '';
       drawRoles();
     });
     // "Go to a callout": a new destination at the callout's centre. A role without a route starts
     // from its side's spawn; an empty position takes the callout's name.
-    rolesEl.querySelectorAll('[data-goal]').forEach(sel => sel.addEventListener('change', () => {
+    rolesEl.querySelectorAll('[data-goal]').forEach(sel => sel.addEventListener('change', async () => {
       if (!sel.value) return;
       syncRoles();
       const map = form.map.value;
@@ -234,6 +234,7 @@ export function editTactic(existing) {
       if (path.length > 1 && placeAt(map, path.at(-1))?.id === sel.value) path.pop();
       path.push(to);
       r.path = path;
+      r.track = store.get('cs.navRoute') === 'off' ? null : await trackFor(map, path);
       if (!r.position) r.position = calloutOptions(map).find(c => c.id === sel.value)?.name || '';
       drawRoles();
     }));
@@ -247,6 +248,12 @@ export function editTactic(existing) {
   }
   drawRoles();
   form.map.addEventListener('change', drawRoles);
+  // Routes drawn before walking tracks existed get one now (saved with the tactic).
+  if (store.get('cs.navRoute') !== 'off') {
+    Promise.all(x.roles.map(async r => {
+      if (r.path?.length > 1 && !r.track) r.track = await trackFor(x.map, r.path);
+    })).then(() => { if (rolesEl.isConnected && form.map.value === x.map) { syncRoles(); drawRoles(); } });
+  }
 
   el.querySelector('[data-act="cancel"]').onclick = () => close();
   form.addEventListener('submit', async e => {
@@ -282,7 +289,7 @@ export function editTactic(existing) {
 function editRoute(map, roles, index) {
   return new Promise(resolve => {
     const role = roles[index];
-    let path = role.path || [];
+    let path = { path: role.path || [], track: role.track || null };
     let done = false;
     const lus = (role.lineups || []).map(lineup).filter(Boolean);
     const who = member(role.member_id);
@@ -296,7 +303,7 @@ function editRoute(map, roles, index) {
           <button type="button" class="btn primary" data-act="ok">Gotowe</button>
         </div>
       </div>`, { wide: true, dismissable: false, onClose: () => resolve(done ? path : null) });
-    mountRouteEditor(el.querySelector('.route-ed'), { map, roles, index, lineups: lus, onChange: p => { path = p; } });
+    mountRouteEditor(el.querySelector('.route-ed'), { map, roles, index, lineups: lus, onChange: (p, t) => { path = { path: p, track: t }; } });
     el.querySelector('[data-act="cancel"]').onclick = () => close();
     el.querySelector('[data-act="ok"]').onclick = () => { done = true; close(); };
   });

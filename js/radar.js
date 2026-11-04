@@ -4,7 +4,8 @@
 // Under everything sit the game's callout zones with their names (🏷 toggles them).
 import { team, store, esc, imageUrl, NADES, segmented, bindSegmented, member } from './core.js';
 import { SPAWNS } from './mapdata.js';
-import { calloutsFor, placeAt, calloutPoint, calloutOptions } from './callouts.js';
+import { calloutsFor, placeAt, calloutPoint, calloutOptions, routePlaces } from './callouts.js';
+import { loadNav, track as walkTrack } from './nav.js';
 
 const LEVEL_NAMES = { main: 'Góra', lower: 'Dół' };
 export const NADE_COLORS = { smoke: '#d5deec', flash: '#fff3a3', molotov: '#ff9a5c', he: '#ff7a8c', decoy: '#b5bfcf' };
@@ -206,39 +207,44 @@ function lineupLayer(lineups, level, { labels = false } = {}) {
 // --- routes: start, waypoints and destination of each role ---
 
 // Catmull-Rom through the points, as cubic Béziers, so routes read as movement, not zigzags.
-function smoothPath(pts) {
+// A walked track bends less (k), so its corners stay off the walls.
+function smoothPath(pts, k = 6) {
   if (pts.length === 2) return `M${n2(pts[0].x)} ${n2(pts[0].y)} L${n2(pts[1].x)} ${n2(pts[1].y)}`;
   let d = `M${n2(pts[0].x)} ${n2(pts[0].y)}`;
   for (let i = 0; i < pts.length - 1; i++) {
     const p0 = pts[i - 1] || pts[i], p1 = pts[i], p2 = pts[i + 1], p3 = pts[i + 2] || p2;
-    d += ` C${n2(p1.x + (p2.x - p0.x) / 6)} ${n2(p1.y + (p2.y - p0.y) / 6)} ${n2(p2.x - (p3.x - p1.x) / 6)} ${n2(p2.y - (p3.y - p1.y) / 6)} ${n2(p2.x)} ${n2(p2.y)}`;
+    d += ` C${n2(p1.x + (p2.x - p0.x) / k)} ${n2(p1.y + (p2.y - p0.y) / k)} ${n2(p2.x - (p3.x - p1.x) / k)} ${n2(p2.y - (p3.y - p1.y) / k)} ${n2(p2.x)} ${n2(p2.y)}`;
   }
   return d;
 }
 
 // Glowing, flowing route lines plus start/waypoint/end markers for every role on one level.
 // `highlight` (a role index) dims the others; parts of a route on the other Nuke floor stay faint.
+// The line follows the role's walked track when it has one; the markers are the points you set.
 function routeLayer(roles, level, { highlight = null } = {}) {
   const fid = `rglow${++uid}`;
   let svg = '', marks = '';
+  const scale = list => (list || []).map(p => ({ x: p.x * 100, y: p.y * 100, level: p.level || 'main' }));
   roles.forEach((role, i) => {
-    const pts = (role.path || []).map(p => ({ x: p.x * 100, y: p.y * 100, level: p.level || 'main' }));
+    const pts = scale(role.path);
     if (!pts.length) return;
+    const walked = role.track?.length > 1;
+    const line = walked ? scale(role.track) : pts;
     const c = roleColor(role, i);
     const dim = highlight != null && highlight !== i;
     const runs = [];
     let run = [];
-    pts.forEach((p, k) => {
+    line.forEach((p, k) => {
       if (p.level === level) run.push(p);
       else if (run.length) { runs.push(run); run = []; }
-      const q = pts[k + 1];
+      const q = line[k + 1];
       if (q && !(p.level === level && q.level === level)) {
         svg += `<line x1="${n2(p.x)}" y1="${n2(p.y)}" x2="${n2(q.x)}" y2="${n2(q.y)}" class="route-cross" stroke="${c}" opacity="${dim ? '.15' : '.4'}" />`;
       }
     });
     if (run.length) runs.push(run);
     for (const r of runs.filter(r => r.length > 1)) {
-      const d = smoothPath(r);
+      const d = smoothPath(r, walked ? 12 : 6);
       svg += `<g class="route ${dim ? 'dim' : ''}" style="--c:${c}">
         <path d="${d}" class="route-glow" filter="url(#${fid})" />
         <path d="${d}" class="route-line" />
@@ -275,11 +281,17 @@ function planBox(map, roles, lineups, level, { highlight = null, cls = '', zoom 
   return radarBox(map, level, { svg: R.svg + L.svg, marks: R.marks + L.marks, cls: `plan ${cls}`, zoom });
 }
 
-// "🧭 T spawn → Banana → B site" for a role's path.
-export function routeLine(map, path) {
-  const names = [];
-  for (const p of path || []) { const c = placeAt(map, p); if (c && names.at(-1) !== c.name) names.push(c.name); }
+// "🧭 T spawn → T Ramp → Banana → B site": the callouts a role walks through (its track when it
+// has one, else straight between its points).
+export function routeLine(map, path, track = null) {
+  const names = routePlaces(map, track?.length > 1 ? track : path).map(c => c.name);
   return names.length ? `<span class="r-chain">🧭 ${names.map(esc).join(' → ')}</span>` : '';
+}
+
+// The walked track for a path on this map, or null (no mesh, fewer than two points).
+export async function trackFor(map, path) {
+  if (!path || path.length < 2) return null;
+  return walkTrack(await loadNav(map), path);
 }
 
 // --- public views ---
@@ -392,14 +404,24 @@ export function mountSpotEditor(el, { map, spot, nade, side, onChange, labels = 
 
 // Route editor for roles[index]: click adds the next point (first = start, last = destination),
 // drag moves a point, double-click removes it. The other roles are shown dimmed for context.
+// With "🧭 Po mapie" on, the line between the points walks the nav mesh (through doors and
+// corridors) instead of going straight. Calls onChange(path, track).
 export function mountRouteEditor(el, { map, roles, index, lineups = [], onChange }) {
   const path = (roles[index].path || []).map(p => ({ ...p }));
+  let track = roles[index].track?.length > 1 ? roles[index].track : null;
   let level = path[0]?.level || dominantLevel(map, { roles, lineups });
+  let walking = store.get('cs.navRoute') !== 'off';
+  let nav;
   const zoom = { z: 1, x: 0, y: 0 };
-  const changed = () => onChange(path.map(p => ({ ...p })));
+  const retrack = () => { track = walking && nav ? walkTrack(nav, path) : null; };
+  const changed = () => { retrack(); onChange(path.map(p => ({ ...p })), track); };
+  loadNav(map).then(n => {
+    nav = n;
+    if (walking && nav && path.length > 1 && !track) { changed(); draw(); }
+  });
 
   const draw = () => {
-    const view = roles.map((r, i) => i === index ? { ...r, path } : r);
+    const view = roles.map((r, i) => i === index ? { ...r, path, track } : r);
     const own = `.rt-pt[data-role="${index}"]`;
     el.innerHTML = `
       <div class="spot-bar">
@@ -409,13 +431,20 @@ export function mountRouteEditor(el, { map, roles, index, lineups = [], onChange
         ${calloutsFor(map).length ? `<select class="goto" data-act="goto" aria-label="Idź na callout">
           <option value="">${path.length ? '+ idź na callout…' : '+ start z calloutu…'}</option>
           ${calloutOptions(map).map(c => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('')}</select>` : ''}
+        <label class="tag-opt" title="Trasa idzie korytarzami z nav mesha gry zamiast prosto"><input type="checkbox" data-act="walk" ${walking ? 'checked' : ''}><span>🧭 Po mapie</span></label>
         <span class="muted small">${path.length ? `${path.length} pkt` : ''}</span>
       </div>
       ${planBox(map, view, lineups, level, { highlight: index, cls: 'pick route-pick', zoom: true })}
       <p class="muted small">${path.length
         ? 'Klikaj kolejne punkty trasy, ostatni to cel. Przeciągnij punkt, żeby go przesunąć, kliknij go dwa razy, żeby usunąć.'
         : 'Kliknij miejsce, z którego gracz startuje.'} Kółko myszy lub dwa palce przybliżają, przeciąganie mapy ją przesuwa.</p>
-      <p class="small r-route">${routeLine(map, path) || '<span class="muted">Trasa po calloutach pojawi się tutaj.</span>'} <b class="r-here"></b></p>`;
+      <p class="small r-route">${routeLine(map, path, track) || '<span class="muted">Trasa po calloutach pojawi się tutaj.</span>'} <b class="r-here"></b></p>`;
+    el.querySelector('[data-act="walk"]').addEventListener('change', e => {
+      walking = e.target.checked;
+      store.set('cs.navRoute', walking ? null : 'off');
+      changed();
+      draw();
+    });
     bindSegmented(el, 'elevel', v => { level = v; draw(); });
     el.querySelector('[data-act="goto"]')?.addEventListener('change', e => {
       const p = calloutPoint(map, e.target.value, level);
@@ -447,6 +476,7 @@ export function mountRouteEditor(el, { map, roles, index, lineups = [], onChange
       if (!drag) return;
       const p = pointFrom(box, e, level);
       Object.assign(path[drag.k], p);
+      delete path[drag.k].z; // height came from a callout pick; a moved point finds its own
       drag.node.style.left = `${p.x * 100}%`;
       drag.node.style.top = `${p.y * 100}%`;
       drag.moved = true;

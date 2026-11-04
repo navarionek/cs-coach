@@ -85,7 +85,7 @@ for (const short of ['ancient', 'inferno', 'nuke']) {
     return {
       id: p.id, name: p.name,
       labels: Object.values(byLevel).map(z => { const [x, y] = centroid(z.poly); return { x: r3(x), y: r3(y), level: z.level, a: Math.round(area(z.poly) * 1e4) / 1e4 }; }),
-      zones: p.zones.map(z => ({ level: z.level, z0: z.z[0], poly: z.poly.map(([x, y]) => [r3(x), r3(y)]) })),
+      zones: p.zones.map(z => ({ level: z.level, z0: z.z[0], z1: z.z[1], poly: z.poly.map(([x, y]) => [r3(x), r3(y)]) })),
     };
   }).sort((a, b) => a.name.localeCompare(b.name));
   console.error(map, out[map].length, 'places', out[map].reduce((a, p) => a + p.zones.length, 0), 'zones');
@@ -95,6 +95,6 @@ for (const short of ['ancient', 'inferno', 'nuke']) {
 fs.writeFileSync(outFile, `// Callout zones (env_cs_place in maps/<map>/entities, the place name the game shows next to a
 // player). Each zone is a physics hull of that entity flattened to a radar polygon (0..1 fractions,
 // like every other point); names come from resource/csgo_english.txt, labels sit on the biggest zone
-// of each floor (a = its area), z0 is a zone's bottom height in the world (stacked places on Nuke). Generated from the game files with Source 2 Viewer CLI, don't edit.
+// of each floor (a = its area), z0..z1 is its height in the world (stacked places on Nuke). Generated from the game files with Source 2 Viewer CLI, don't edit.
 export const CALLOUTS = ${JSON.stringify(out)};
 `);
