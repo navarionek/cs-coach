@@ -1,4 +1,4 @@
-// Builds js/callouts.js: every env_cs_place (the callout zones the game shows next to your name)
+// Builds js/calloutdata.js: every env_cs_place (the callout zones the game shows next to your name)
 // with its physics hulls flattened to radar polygons.
 // node tools/extract-callouts.js <entsDir> <physDir> <csgo_english.txt> js/calloutdata.js
 // entsDir/<short>: decompiled maps/de_<short>/entities/default_ents.vents_c (Source2Viewer-CLI -d);
